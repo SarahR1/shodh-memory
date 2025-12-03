@@ -8,7 +8,6 @@
 //! Run with: cargo test --test integration_tests -- --nocapture
 
 use std::collections::HashMap;
-use std::path::PathBuf;
 use std::time::Instant;
 use tempfile::TempDir;
 
@@ -30,6 +29,7 @@ struct TestReporter {
 struct TestResult {
     name: String,
     passed: bool,
+    #[allow(unused)] // Used for reporting
     duration_ms: u128,
     details: String,
 }
@@ -38,7 +38,7 @@ impl TestReporter {
     fn new(suite_name: &str) -> Self {
         println!("\n{}", "=".repeat(80));
         println!("  SHODH-MEMORY INTEGRATION TEST SUITE");
-        println!("  {}", suite_name);
+        println!("  {suite_name}");
         println!("{}", "=".repeat(80));
         println!("  Enterprise-grade AI Memory for Robotics & Autonomous Systems");
         println!("  Version: 0.1.0 | License: Commercial\n");
@@ -52,9 +52,9 @@ impl TestReporter {
 
     fn record(&mut self, name: &str, passed: bool, duration_ms: u128, details: &str) {
         let status = if passed { "[PASS]" } else { "[FAIL]" };
-        println!("  {} {} ({} ms)", status, name, duration_ms);
+        println!("  {status} {name} ({duration_ms} ms)");
         if !details.is_empty() {
-            println!("       {}", details);
+            println!("       {details}");
         }
 
         self.results.push(TestResult {
@@ -66,7 +66,7 @@ impl TestReporter {
     }
 
     fn section(&self, name: &str) {
-        println!("\n  --- {} ---\n", name);
+        println!("\n  --- {name} ---\n");
     }
 
     fn report(self) {
@@ -78,23 +78,20 @@ impl TestReporter {
         println!("\n{}", "=".repeat(80));
         println!("  TEST SUITE SUMMARY: {}", self.test_name);
         println!("{}", "-".repeat(80));
-        println!("  Total Tests:  {}", total);
+        println!("  Total Tests:  {total}");
         println!(
             "  Passed:       {} ({:.1}%)",
             passed,
             (passed as f64 / total as f64) * 100.0
         );
-        println!("  Failed:       {}", failed);
-        println!("  Duration:     {} ms", total_duration);
+        println!("  Failed:       {failed}");
+        println!("  Duration:     {total_duration} ms");
         println!("{}", "=".repeat(80));
 
         if failed == 0 {
             println!("\n  [SUCCESS] All tests passed - System ready for production deployment\n");
         } else {
-            println!(
-                "\n  [WARNING] {} tests failed - Review before deployment\n",
-                failed
-            );
+            println!("\n  [WARNING] {failed} tests failed - Review before deployment\n");
             for result in &self.results {
                 if !result.passed {
                     println!("    - {}: {}", result.name, result.details);
@@ -127,21 +124,10 @@ fn create_robotics_experience(content: &str, robot_id: &str, entities: Vec<&str>
     Experience {
         experience_type: ExperienceType::Observation,
         content: content.to_string(),
-        context: None,
         entities: entities.into_iter().map(|s| s.to_string()).collect(),
         metadata,
-        embeddings: None,
-        related_memories: Vec::new(),
-        causal_chain: Vec::new(),
-        outcomes: Vec::new(),
         robot_id: Some(robot_id.to_string()),
-        mission_id: None,
-        geo_location: None,
-        local_position: None,
-        heading: None,
-        action_type: None,
-        reward: None,
-        sensor_data: HashMap::new(),
+        ..Default::default()
     }
 }
 
@@ -159,21 +145,13 @@ fn create_drone_experience(
     Experience {
         experience_type: ExperienceType::Task,
         content: content.to_string(),
-        context: None,
         entities: vec![drone_id.to_string(), mission_id.to_string()],
         metadata,
-        embeddings: None,
-        related_memories: Vec::new(),
-        causal_chain: Vec::new(),
-        outcomes: Vec::new(),
         robot_id: Some(drone_id.to_string()),
         mission_id: Some(mission_id.to_string()),
         geo_location,
-        local_position: None,
-        heading: None,
         action_type: action_type.map(|s| s.to_string()),
-        reward: None,
-        sensor_data: HashMap::new(),
+        ..Default::default()
     }
 }
 
@@ -200,7 +178,7 @@ fn test_core_memory_operations() {
                 "Initialize memory system",
                 true,
                 init_duration,
-                &format!("System initialized in {} ms", init_duration),
+                &format!("System initialized in {init_duration} ms"),
             );
             s
         }
@@ -209,7 +187,7 @@ fn test_core_memory_operations() {
                 "Initialize memory system",
                 false,
                 init_duration,
-                &format!("Failed: {}", e),
+                &format!("Failed: {e}"),
             );
             reporter.report();
             panic!("Cannot continue without memory system");
@@ -223,25 +201,16 @@ fn test_core_memory_operations() {
     let experience = Experience {
         experience_type: ExperienceType::Observation,
         content: "Robot arm successfully grasped object at position (10, 20, 5)".to_string(),
-        context: None,
         entities: vec![
             "robot_arm".to_string(),
             "grasp".to_string(),
             "object".to_string(),
         ],
-        metadata: HashMap::new(),
-        embeddings: None,
-        related_memories: Vec::new(),
-        causal_chain: Vec::new(),
-        outcomes: Vec::new(),
         robot_id: Some("arm_001".to_string()),
-        mission_id: None,
-        geo_location: None,
         local_position: Some([10.0, 20.0, 5.0]),
-        heading: None,
         action_type: Some("grasp".to_string()),
         reward: Some(0.95),
-        sensor_data: HashMap::new(),
+        ..Default::default()
     };
 
     let record_result = system.record(experience);
@@ -261,7 +230,7 @@ fn test_core_memory_operations() {
                 "Record experience",
                 false,
                 record_duration,
-                &format!("Failed: {}", e),
+                &format!("Failed: {e}"),
             );
         }
     }
@@ -271,7 +240,7 @@ fn test_core_memory_operations() {
     let mut success_count = 0;
     for i in 0..10 {
         let exp = create_robotics_experience(
-            &format!("Test observation {} - sensor reading at waypoint", i),
+            &format!("Test observation {i} - sensor reading at waypoint"),
             "robot_001",
             vec!["sensor", "waypoint"],
         );
@@ -323,7 +292,7 @@ fn test_core_memory_operations() {
                 "Semantic retrieval",
                 false,
                 retrieve_duration,
-                &format!("Failed: {}", e),
+                &format!("Failed: {e}"),
             );
         }
     }
@@ -353,7 +322,7 @@ fn test_core_memory_operations() {
                 "Entity-based retrieval",
                 false,
                 entity_duration,
-                &format!("Failed: {}", e),
+                &format!("Failed: {e}"),
             );
         }
     }
@@ -406,21 +375,10 @@ fn test_robotics_scenarios() {
             let exp = Experience {
                 experience_type: ExperienceType::Task,
                 content: event.to_string(),
-                context: None,
                 entities: vec![mission_type.to_string()],
-                metadata: HashMap::new(),
-                embeddings: None,
-                related_memories: Vec::new(),
-                causal_chain: Vec::new(),
-                outcomes: Vec::new(),
                 robot_id: Some("robot_001".to_string()),
                 mission_id: Some(mission_id.to_string()),
-                geo_location: None,
-                local_position: None,
-                heading: None,
-                action_type: None,
-                reward: None,
-                sensor_data: HashMap::new(),
+                ..Default::default()
             };
             if system.record(exp).is_err() {
                 mission_success = false;
@@ -462,7 +420,7 @@ fn test_robotics_scenarios() {
                 "Mission-filtered retrieval",
                 false,
                 patrol_duration,
-                &format!("Failed: {}", e),
+                &format!("Failed: {e}"),
             );
         }
     }
@@ -485,21 +443,11 @@ fn test_robotics_scenarios() {
                 "Obstacle detected: {} at position ({}, {}, {})",
                 desc, pos[0], pos[1], pos[2]
             ),
-            context: None,
             entities: vec!["obstacle".to_string(), desc.to_lowercase()],
-            metadata: HashMap::new(),
-            embeddings: None,
-            related_memories: Vec::new(),
-            causal_chain: Vec::new(),
-            outcomes: Vec::new(),
             robot_id: Some("robot_001".to_string()),
-            mission_id: None,
-            geo_location: None,
             local_position: Some(pos),
-            heading: None,
             action_type: Some("obstacle_detection".to_string()),
-            reward: None,
-            sensor_data: HashMap::new(),
+            ..Default::default()
         };
         if system.record(exp).is_ok() {
             obstacle_count += 1;
@@ -511,7 +459,7 @@ fn test_robotics_scenarios() {
         "Obstacle memory storage",
         obstacle_count == 3,
         obstacle_duration,
-        &format!("{}/3 obstacles recorded", obstacle_count),
+        &format!("{obstacle_count}/3 obstacles recorded"),
     );
 
     // Test 4: Query obstacles
@@ -540,7 +488,7 @@ fn test_robotics_scenarios() {
                 "Obstacle memory retrieval",
                 false,
                 obstacle_query_duration,
-                &format!("Failed: {}", e),
+                &format!("Failed: {e}"),
             );
         }
     }
@@ -559,33 +507,23 @@ fn test_robotics_scenarios() {
     let mut calibration_success = true;
     for (sensor, accuracy, status) in sensors {
         let mut sensor_data = HashMap::new();
-        sensor_data.insert(format!("{}_accuracy", sensor), accuracy);
+        sensor_data.insert(format!("{sensor}_accuracy"), accuracy);
 
         let exp = Experience {
             experience_type: ExperienceType::Pattern,
             content: format!(
-                "Sensor {} calibration: accuracy {:.2}, status: {}",
-                sensor, accuracy, status
+                "Sensor {sensor} calibration: accuracy {accuracy:.2}, status: {status}"
             ),
-            context: None,
             entities: vec![
                 "sensor".to_string(),
                 "calibration".to_string(),
                 sensor.to_string(),
             ],
-            metadata: HashMap::new(),
-            embeddings: None,
-            related_memories: Vec::new(),
-            causal_chain: Vec::new(),
-            outcomes: Vec::new(),
             robot_id: Some("robot_001".to_string()),
-            mission_id: None,
-            geo_location: None,
-            local_position: None,
-            heading: None,
             action_type: Some("calibration".to_string()),
             reward: Some(accuracy as f32),
             sensor_data,
+            ..Default::default()
         };
         if system.record(exp).is_err() {
             calibration_success = false;
@@ -625,7 +563,7 @@ fn test_robotics_scenarios() {
                 "Recalibration needs query",
                 false,
                 recal_duration,
-                &format!("Failed: {}", e),
+                &format!("Failed: {e}"),
             );
         }
     }
@@ -649,7 +587,7 @@ fn test_drone_fleet_operations() {
 
     // Test 1: Multi-drone mission recording
     let start = Instant::now();
-    let drones = vec!["drone_alpha", "drone_beta", "drone_gamma"];
+    let drones = ["drone_alpha", "drone_beta", "drone_gamma"];
     let mut success_count = 0;
 
     for (i, drone_id) in drones.iter().enumerate() {
@@ -677,7 +615,7 @@ fn test_drone_fleet_operations() {
         "Multi-drone mission init",
         success_count == 3,
         multi_drone_duration,
-        &format!("{}/3 drones initialized", success_count),
+        &format!("{success_count}/3 drones initialized"),
     );
 
     reporter.section("Geo-Spatial Memory");
@@ -715,7 +653,7 @@ fn test_drone_fleet_operations() {
         "Geo-tagged event recording",
         geo_success == 4,
         geo_duration,
-        &format!("{}/4 geo-tagged events recorded", geo_success),
+        &format!("{geo_success}/4 geo-tagged events recorded"),
     );
 
     // Test 3: Geo-spatial query
@@ -744,7 +682,7 @@ fn test_drone_fleet_operations() {
                 "Geo-spatial retrieval",
                 false,
                 geo_query_duration,
-                &format!("Failed: {}", e),
+                &format!("Failed: {e}"),
             );
         }
     }
@@ -753,7 +691,7 @@ fn test_drone_fleet_operations() {
 
     // Test 4: Record flight path
     let start = Instant::now();
-    let waypoints = vec![
+    let waypoints = [
         ([37.7749, -122.4194, 100.0], 0.0_f32),
         ([37.7760, -122.4180, 105.0], 45.0),
         ([37.7775, -122.4160, 110.0], 60.0),
@@ -771,21 +709,14 @@ fn test_drone_fleet_operations() {
                 pos[2],
                 heading
             ),
-            context: None,
             entities: vec!["waypoint".to_string(), "flight_path".to_string()],
-            metadata: HashMap::new(),
-            embeddings: None,
-            related_memories: Vec::new(),
-            causal_chain: Vec::new(),
-            outcomes: Vec::new(),
             robot_id: Some("drone_alpha".to_string()),
             mission_id: Some("flight_001".to_string()),
             geo_location: Some(*pos),
-            local_position: None,
             heading: Some(*heading),
             action_type: Some("navigation".to_string()),
             reward: Some(1.0),
-            sensor_data: HashMap::new(),
+            ..Default::default()
         };
         if system.record(exp).is_ok() {
             path_success += 1;
@@ -797,7 +728,7 @@ fn test_drone_fleet_operations() {
         "Flight path recording",
         path_success == 5,
         path_duration,
-        &format!("{}/5 waypoints recorded", path_success),
+        &format!("{path_success}/5 waypoints recorded"),
     );
 
     // Test 5: Query flight path
@@ -827,7 +758,7 @@ fn test_drone_fleet_operations() {
                 "Flight path retrieval",
                 false,
                 path_query_duration,
-                &format!("Failed: {}", e),
+                &format!("Failed: {e}"),
             );
         }
     }
@@ -853,24 +784,15 @@ fn test_drone_fleet_operations() {
         let exp = Experience {
             experience_type: ExperienceType::Pattern,
             content: format!(
-                "Battery at {}% ({}) after {} minutes of flight",
-                level, status, flight_minutes
+                "Battery at {level}% ({status}) after {flight_minutes} minutes of flight"
             ),
-            context: None,
             entities: vec!["battery".to_string(), status.to_string()],
-            metadata: HashMap::new(),
-            embeddings: None,
-            related_memories: Vec::new(),
-            causal_chain: Vec::new(),
-            outcomes: Vec::new(),
             robot_id: Some("drone_alpha".to_string()),
             mission_id: Some("flight_001".to_string()),
-            geo_location: None,
-            local_position: None,
-            heading: None,
             action_type: Some("telemetry".to_string()),
             reward: Some((level as f32) / 100.0),
             sensor_data,
+            ..Default::default()
         };
         if system.record(exp).is_ok() {
             battery_success += 1;
@@ -882,7 +804,7 @@ fn test_drone_fleet_operations() {
         "Battery telemetry tracking",
         battery_success == 5,
         battery_duration,
-        &format!("{}/5 battery readings recorded", battery_success),
+        &format!("{battery_success}/5 battery readings recorded"),
     );
 
     // Test 7: Critical battery query
@@ -910,7 +832,7 @@ fn test_drone_fleet_operations() {
                 "Critical status retrieval",
                 false,
                 critical_duration,
-                &format!("Failed: {}", e),
+                &format!("Failed: {e}"),
             );
         }
     }
@@ -941,10 +863,7 @@ fn test_performance_benchmarks() {
 
         for i in 0..batch_size {
             let exp = create_robotics_experience(
-                &format!(
-                    "Performance test observation {} with sensor data and position tracking",
-                    i
-                ),
+                &format!("Performance test observation {i} with sensor data and position tracking"),
                 &format!("perf_robot_{}", i % 5),
                 vec!["performance", "benchmark", "sensor"],
             );
@@ -961,7 +880,7 @@ fn test_performance_benchmarks() {
         };
 
         reporter.record(
-            &format!("Insert {} memories", batch_size),
+            &format!("Insert {batch_size} memories"),
             success == batch_size,
             duration,
             &format!(
@@ -1003,10 +922,10 @@ fn test_performance_benchmarks() {
         let avg_duration = total_duration / iterations as u128;
 
         reporter.record(
-            &format!("{} query", name),
+            &format!("{name} query"),
             avg_duration < 500, // Target: <500ms average
             avg_duration,
-            &format!("avg over {} iterations", iterations),
+            &format!("avg over {iterations} iterations"),
         );
     }
 
@@ -1050,23 +969,8 @@ fn test_reliability_and_edge_cases() {
     // Test 1: Empty content handling
     let start = Instant::now();
     let exp = Experience {
-        experience_type: ExperienceType::Observation,
         content: "".to_string(), // Empty content
-        context: None,
-        entities: Vec::new(),
-        metadata: HashMap::new(),
-        embeddings: None,
-        related_memories: Vec::new(),
-        causal_chain: Vec::new(),
-        outcomes: Vec::new(),
-        robot_id: None,
-        mission_id: None,
-        geo_location: None,
-        local_position: None,
-        heading: None,
-        action_type: None,
-        reward: None,
-        sensor_data: HashMap::new(),
+        ..Default::default()
     };
 
     let empty_result = system.record(exp);
@@ -1084,23 +988,8 @@ fn test_reliability_and_edge_cases() {
     let start = Instant::now();
     let long_content = "x".repeat(10000); // 10KB of content
     let exp = Experience {
-        experience_type: ExperienceType::Observation,
         content: long_content,
-        context: None,
-        entities: Vec::new(),
-        metadata: HashMap::new(),
-        embeddings: None,
-        related_memories: Vec::new(),
-        causal_chain: Vec::new(),
-        outcomes: Vec::new(),
-        robot_id: None,
-        mission_id: None,
-        geo_location: None,
-        local_position: None,
-        heading: None,
-        action_type: None,
-        reward: None,
-        sensor_data: HashMap::new(),
+        ..Default::default()
     };
 
     let long_result = system.record(exp);
@@ -1110,30 +999,16 @@ fn test_reliability_and_edge_cases() {
         "Large content handling (10KB)",
         long_result.is_ok(),
         long_duration,
-        &format!("Processed in {} ms", long_duration),
+        &format!("Processed in {long_duration} ms"),
     );
 
     // Test 3: Special characters in content
     let start = Instant::now();
     let special_content = "Test with special chars: <>&\"' \n\t\r and unicode: 你好世界 🤖 λ∑∏";
     let exp = Experience {
-        experience_type: ExperienceType::Observation,
         content: special_content.to_string(),
-        context: None,
         entities: vec!["unicode".to_string(), "special_chars".to_string()],
-        metadata: HashMap::new(),
-        embeddings: None,
-        related_memories: Vec::new(),
-        causal_chain: Vec::new(),
-        outcomes: Vec::new(),
-        robot_id: None,
-        mission_id: None,
-        geo_location: None,
-        local_position: None,
-        heading: None,
-        action_type: None,
-        reward: None,
-        sensor_data: HashMap::new(),
+        ..Default::default()
     };
 
     let special_result = system.record(exp);
@@ -1191,7 +1066,7 @@ fn test_reliability_and_edge_cases() {
                 "No-match query",
                 false,
                 no_results_duration,
-                &format!("Failed: {}", e),
+                &format!("Failed: {e}"),
             );
         }
     }
@@ -1206,7 +1081,7 @@ fn test_reliability_and_edge_cases() {
         // Alternate between record and retrieve
         if i % 2 == 0 {
             let exp = create_robotics_experience(
-                &format!("Concurrent test {}", i),
+                &format!("Concurrent test {i}"),
                 "robot_concurrent",
                 vec!["concurrent"],
             );
@@ -1230,7 +1105,7 @@ fn test_reliability_and_edge_cases() {
         "Rapid sequential ops (20)",
         ops_success == 20,
         concurrent_duration,
-        &format!("{}/20 operations successful", ops_success),
+        &format!("{ops_success}/20 operations successful"),
     );
 
     reporter.section("Data Persistence");
@@ -1271,10 +1146,7 @@ fn test_stress_scenarios() {
 
     for i in 0..target {
         let exp = create_robotics_experience(
-            &format!(
-                "Stress test record {} - high frequency sensor data from multiple sources",
-                i
-            ),
+            &format!("Stress test record {i} - high frequency sensor data from multiple sources"),
             &format!("stress_robot_{}", i % 10),
             vec!["stress", "high_volume", "sensor"],
         );
@@ -1291,13 +1163,10 @@ fn test_stress_scenarios() {
     };
 
     reporter.record(
-        &format!("{} rapid insertions", target),
+        &format!("{target} rapid insertions"),
         success >= (target * 95 / 100), // 95% success threshold
         stress_duration,
-        &format!(
-            "{}/{} successful ({:.1} records/sec)",
-            success, target, rate
-        ),
+        &format!("{success}/{target} successful ({rate:.1} records/sec)"),
     );
 
     // Rapid queries after stress
@@ -1319,7 +1188,7 @@ fn test_stress_scenarios() {
     let query_duration = start.elapsed().as_millis();
 
     reporter.record(
-        &format!("{} queries post-stress", query_count),
+        &format!("{query_count} queries post-stress"),
         query_success == query_count,
         query_duration,
         &format!(

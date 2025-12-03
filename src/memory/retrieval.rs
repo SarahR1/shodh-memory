@@ -4,7 +4,7 @@
 use anyhow::{Context, Result};
 use parking_lot::RwLock;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::Arc;
 
 use super::storage::{MemoryStorage, SearchCriteria};
@@ -588,20 +588,16 @@ impl RetrievalEngine {
     }
 
     /// Save vector index to disk (for persistence)
-    pub fn save_index(&self, path: &PathBuf) -> Result<()> {
+    pub fn save_index(&self, path: &Path) -> Result<()> {
         let index = self.vector_index.read();
-        index
-            .save(path.as_path())
-            .context("Failed to save vector index")?;
+        index.save(path).context("Failed to save vector index")?;
         Ok(())
     }
 
     /// Load vector index from disk
-    pub fn load_index(&self, path: &PathBuf) -> Result<()> {
+    pub fn load_index(&self, path: &Path) -> Result<()> {
         let mut index = self.vector_index.write();
-        index
-            .load(path.as_path())
-            .context("Failed to load vector index")?;
+        index.load(path).context("Failed to load vector index")?;
         Ok(())
     }
 

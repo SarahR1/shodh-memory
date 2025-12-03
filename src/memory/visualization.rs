@@ -404,27 +404,12 @@ mod tests {
     use crate::memory::{Experience, ExperienceType, Memory, MemoryId};
 
     fn create_test_memory() -> Memory {
-        use std::collections::HashMap;
         use uuid::Uuid;
 
         let experience = Experience {
             experience_type: ExperienceType::Conversation,
             content: "test content".to_string(),
-            context: None,
-            entities: vec![],
-            metadata: HashMap::new(),
-            embeddings: None,
-            related_memories: vec![],
-            causal_chain: vec![],
-            outcomes: vec![],
-            robot_id: None,
-            mission_id: None,
-            geo_location: None,
-            local_position: None,
-            heading: None,
-            action_type: None,
-            reward: None,
-            sensor_data: HashMap::new(),
+            ..Default::default()
         };
 
         Memory::new(

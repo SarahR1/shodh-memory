@@ -195,15 +195,13 @@ impl MemoryStorage {
                 prefix.as_bytes(),
                 rocksdb::Direction::Forward,
             ));
-            for result in iter {
-                if let Ok((key, _)) = result {
-                    let key_str = String::from_utf8_lossy(&key);
-                    if !key_str.starts_with(&prefix) {
-                        break;
-                    }
-                    if key_str.contains(&id.0.to_string()) {
-                        batch.delete(&key);
-                    }
+            for (key, _) in iter.flatten() {
+                let key_str = String::from_utf8_lossy(&key);
+                if !key_str.starts_with(&prefix) {
+                    break;
+                }
+                if key_str.contains(&id.0.to_string()) {
+                    batch.delete(&key);
                 }
             }
         }
@@ -293,17 +291,15 @@ impl MemoryStorage {
             start_key.as_bytes(),
             rocksdb::Direction::Forward,
         ));
-        for result in iter {
-            if let Ok((key, value)) = result {
-                let key_str = String::from_utf8_lossy(&key);
-                if key_str.as_ref() > end_key.as_str() {
-                    break;
-                }
-                if key_str.starts_with("date:") {
-                    let id_str = String::from_utf8_lossy(&value);
-                    if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
-                        ids.push(MemoryId(uuid));
-                    }
+        for (key, value) in iter.flatten() {
+            let key_str = String::from_utf8_lossy(&key);
+            if key_str.as_ref() > end_key.as_str() {
+                break;
+            }
+            if key_str.starts_with("date:") {
+                let id_str = String::from_utf8_lossy(&value);
+                if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
+                    ids.push(MemoryId(uuid));
                 }
             }
         }
@@ -319,17 +315,15 @@ impl MemoryStorage {
             prefix.as_bytes(),
             rocksdb::Direction::Forward,
         ));
-        for result in iter {
-            if let Ok((key, _)) = result {
-                let key_str = String::from_utf8_lossy(&key);
-                if !key_str.starts_with(&prefix) {
-                    break;
-                }
-                // Extract ID from key
-                if let Some(id_str) = key_str.strip_prefix(&prefix) {
-                    if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
-                        ids.push(MemoryId(uuid));
-                    }
+        for (key, _) in iter.flatten() {
+            let key_str = String::from_utf8_lossy(&key);
+            if !key_str.starts_with(&prefix) {
+                break;
+            }
+            // Extract ID from key
+            if let Some(id_str) = key_str.strip_prefix(&prefix) {
+                if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
+                    ids.push(MemoryId(uuid));
                 }
             }
         }
@@ -349,17 +343,15 @@ impl MemoryStorage {
                 rocksdb::Direction::Forward,
             ));
 
-            for result in iter {
-                if let Ok((key, _)) = result {
-                    let key_str = String::from_utf8_lossy(&key);
-                    if !key_str.starts_with(&prefix) {
-                        break;
-                    }
-                    // Extract ID from key
-                    if let Some(id_str) = key_str.strip_prefix(&prefix) {
-                        if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
-                            ids.push(MemoryId(uuid));
-                        }
+            for (key, _) in iter.flatten() {
+                let key_str = String::from_utf8_lossy(&key);
+                if !key_str.starts_with(&prefix) {
+                    break;
+                }
+                // Extract ID from key
+                if let Some(id_str) = key_str.strip_prefix(&prefix) {
+                    if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
+                        ids.push(MemoryId(uuid));
                     }
                 }
             }
@@ -376,17 +368,15 @@ impl MemoryStorage {
             prefix.as_bytes(),
             rocksdb::Direction::Forward,
         ));
-        for result in iter {
-            if let Ok((key, _)) = result {
-                let key_str = String::from_utf8_lossy(&key);
-                if !key_str.starts_with(&prefix) {
-                    break;
-                }
-                // Extract ID from key
-                if let Some(id_str) = key_str.strip_prefix(&prefix) {
-                    if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
-                        ids.push(MemoryId(uuid));
-                    }
+        for (key, _) in iter.flatten() {
+            let key_str = String::from_utf8_lossy(&key);
+            if !key_str.starts_with(&prefix) {
+                break;
+            }
+            // Extract ID from key
+            if let Some(id_str) = key_str.strip_prefix(&prefix) {
+                if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
+                    ids.push(MemoryId(uuid));
                 }
             }
         }
@@ -407,16 +397,14 @@ impl MemoryStorage {
             prefix.as_bytes(),
             rocksdb::Direction::Forward,
         ));
-        for result in iter {
-            if let Ok((key, _)) = result {
-                let key_str = String::from_utf8_lossy(&key);
-                if !key_str.starts_with(&prefix) {
-                    break;
-                }
-                if let Some(id_str) = key_str.strip_prefix(&prefix) {
-                    if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
-                        ids.push(MemoryId(uuid));
-                    }
+        for (key, _) in iter.flatten() {
+            let key_str = String::from_utf8_lossy(&key);
+            if !key_str.starts_with(&prefix) {
+                break;
+            }
+            if let Some(id_str) = key_str.strip_prefix(&prefix) {
+                if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
+                    ids.push(MemoryId(uuid));
                 }
             }
         }
@@ -433,16 +421,14 @@ impl MemoryStorage {
             prefix.as_bytes(),
             rocksdb::Direction::Forward,
         ));
-        for result in iter {
-            if let Ok((key, _)) = result {
-                let key_str = String::from_utf8_lossy(&key);
-                if !key_str.starts_with(&prefix) {
-                    break;
-                }
-                if let Some(id_str) = key_str.strip_prefix(&prefix) {
-                    if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
-                        ids.push(MemoryId(uuid));
-                    }
+        for (key, _) in iter.flatten() {
+            let key_str = String::from_utf8_lossy(&key);
+            if !key_str.starts_with(&prefix) {
+                break;
+            }
+            if let Some(id_str) = key_str.strip_prefix(&prefix) {
+                if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
+                    ids.push(MemoryId(uuid));
                 }
             }
         }
@@ -469,23 +455,21 @@ impl MemoryStorage {
             rocksdb::Direction::Forward,
         ));
 
-        for result in iter {
-            if let Ok((key, value)) = result {
-                let key_str = String::from_utf8_lossy(&key);
-                if !key_str.starts_with(prefix) {
-                    break;
-                }
+        for (key, value) in iter.flatten() {
+            let key_str = String::from_utf8_lossy(&key);
+            if !key_str.starts_with(prefix) {
+                break;
+            }
 
-                // Key format: geo:lat:lon:memory_id
-                // Value contains the memory ID
-                let parts: Vec<&str> = key_str.split(':').collect();
-                if parts.len() >= 4 {
-                    if let (Ok(lat), Ok(lon)) = (parts[1].parse::<f64>(), parts[2].parse::<f64>()) {
-                        if geo_filter.contains(lat, lon) {
-                            let id_str = String::from_utf8_lossy(&value);
-                            if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
-                                ids.push(MemoryId(uuid));
-                            }
+            // Key format: geo:lat:lon:memory_id
+            // Value contains the memory ID
+            let parts: Vec<&str> = key_str.split(':').collect();
+            if parts.len() >= 4 {
+                if let (Ok(lat), Ok(lon)) = (parts[1].parse::<f64>(), parts[2].parse::<f64>()) {
+                    if geo_filter.contains(lat, lon) {
+                        let id_str = String::from_utf8_lossy(&value);
+                        if let Ok(uuid) = uuid::Uuid::parse_str(&id_str) {
+                            ids.push(MemoryId(uuid));
                         }
                     }
                 }
@@ -504,16 +488,14 @@ impl MemoryStorage {
             prefix.as_bytes(),
             rocksdb::Direction::Forward,
         ));
-        for result in iter {
-            if let Ok((key, _)) = result {
-                let key_str = String::from_utf8_lossy(&key);
-                if !key_str.starts_with(&prefix) {
-                    break;
-                }
-                if let Some(id_str) = key_str.strip_prefix(&prefix) {
-                    if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
-                        ids.push(MemoryId(uuid));
-                    }
+        for (key, _) in iter.flatten() {
+            let key_str = String::from_utf8_lossy(&key);
+            if !key_str.starts_with(&prefix) {
+                break;
+            }
+            if let Some(id_str) = key_str.strip_prefix(&prefix) {
+                if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
+                    ids.push(MemoryId(uuid));
                 }
             }
         }
@@ -536,16 +518,14 @@ impl MemoryStorage {
                 rocksdb::Direction::Forward,
             ));
 
-            for result in iter {
-                if let Ok((key, _)) = result {
-                    let key_str = String::from_utf8_lossy(&key);
-                    if !key_str.starts_with(&prefix) {
-                        break;
-                    }
-                    if let Some(id_str) = key_str.strip_prefix(&prefix) {
-                        if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
-                            ids.push(MemoryId(uuid));
-                        }
+            for (key, _) in iter.flatten() {
+                let key_str = String::from_utf8_lossy(&key);
+                if !key_str.starts_with(&prefix) {
+                    break;
+                }
+                if let Some(id_str) = key_str.strip_prefix(&prefix) {
+                    if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
+                        ids.push(MemoryId(uuid));
                     }
                 }
             }
@@ -560,11 +540,9 @@ impl MemoryStorage {
 
         // Iterate through all memories
         let iter = self.db.iterator(IteratorMode::Start);
-        for result in iter {
-            if let Ok((_, value)) = result {
-                if let Ok(memory) = bincode::deserialize::<Memory>(&value) {
-                    memories.push(memory);
-                }
+        for (_, value) in iter.flatten() {
+            if let Ok(memory) = bincode::deserialize::<Memory>(&value) {
+                memories.push(memory);
             }
         }
 
@@ -576,12 +554,10 @@ impl MemoryStorage {
 
         // Iterate through all memories
         let iter = self.db.iterator(IteratorMode::Start);
-        for result in iter {
-            if let Ok((_, value)) = result {
-                if let Ok(memory) = bincode::deserialize::<Memory>(&value) {
-                    if !memory.compressed && memory.created_at < cutoff {
-                        memories.push(memory);
-                    }
+        for (_, value) in iter.flatten() {
+            if let Ok(memory) = bincode::deserialize::<Memory>(&value) {
+                if !memory.compressed && memory.created_at < cutoff {
+                    memories.push(memory);
                 }
             }
         }
@@ -594,24 +570,22 @@ impl MemoryStorage {
         let mut count = 0;
 
         let iter = self.db.iterator(IteratorMode::Start);
-        for result in iter {
-            if let Ok((key, value)) = result {
-                if let Ok(mut memory) = bincode::deserialize::<Memory>(&value) {
-                    if memory.created_at < cutoff {
-                        // Add forgotten flag to metadata
-                        memory
-                            .experience
-                            .metadata
-                            .insert("forgotten".to_string(), "true".to_string());
-                        memory
-                            .experience
-                            .metadata
-                            .insert("forgotten_at".to_string(), Utc::now().to_rfc3339());
+        for (key, value) in iter.flatten() {
+            if let Ok(mut memory) = bincode::deserialize::<Memory>(&value) {
+                if memory.created_at < cutoff {
+                    // Add forgotten flag to metadata
+                    memory
+                        .experience
+                        .metadata
+                        .insert("forgotten".to_string(), "true".to_string());
+                    memory
+                        .experience
+                        .metadata
+                        .insert("forgotten_at".to_string(), Utc::now().to_rfc3339());
 
-                        let updated_value = bincode::serialize(&memory)?;
-                        self.db.put(&key, updated_value)?;
-                        count += 1;
-                    }
+                    let updated_value = bincode::serialize(&memory)?;
+                    self.db.put(&key, updated_value)?;
+                    count += 1;
                 }
             }
         }
@@ -624,23 +598,21 @@ impl MemoryStorage {
         let mut count = 0;
 
         let iter = self.db.iterator(IteratorMode::Start);
-        for result in iter {
-            if let Ok((key, value)) = result {
-                if let Ok(mut memory) = bincode::deserialize::<Memory>(&value) {
-                    if memory.importance() < threshold {
-                        memory
-                            .experience
-                            .metadata
-                            .insert("forgotten".to_string(), "true".to_string());
-                        memory
-                            .experience
-                            .metadata
-                            .insert("forgotten_at".to_string(), Utc::now().to_rfc3339());
+        for (key, value) in iter.flatten() {
+            if let Ok(mut memory) = bincode::deserialize::<Memory>(&value) {
+                if memory.importance() < threshold {
+                    memory
+                        .experience
+                        .metadata
+                        .insert("forgotten".to_string(), "true".to_string());
+                    memory
+                        .experience
+                        .metadata
+                        .insert("forgotten_at".to_string(), Utc::now().to_rfc3339());
 
-                        let updated_value = bincode::serialize(&memory)?;
-                        self.db.put(&key, updated_value)?;
-                        count += 1;
-                    }
+                    let updated_value = bincode::serialize(&memory)?;
+                    self.db.put(&key, updated_value)?;
+                    count += 1;
                 }
             }
         }
@@ -654,13 +626,11 @@ impl MemoryStorage {
         let mut to_delete = Vec::new();
 
         let iter = self.db.iterator(IteratorMode::Start);
-        for result in iter {
-            if let Ok((key, value)) = result {
-                if let Ok(memory) = bincode::deserialize::<Memory>(&value) {
-                    if regex.is_match(&memory.experience.content) {
-                        to_delete.push(key.to_vec());
-                        count += 1;
-                    }
+        for (key, value) in iter.flatten() {
+            if let Ok(memory) = bincode::deserialize::<Memory>(&value) {
+                if regex.is_match(&memory.experience.content) {
+                    to_delete.push(key.to_vec());
+                    count += 1;
                 }
             }
         }
@@ -689,16 +659,14 @@ impl MemoryStorage {
         let mut stats = StorageStats::default();
 
         let iter = self.db.iterator(IteratorMode::Start);
-        for result in iter {
-            if let Ok((_, value)) = result {
-                if let Ok(memory) = bincode::deserialize::<Memory>(&value) {
-                    stats.total_count += 1;
-                    stats.total_size_bytes += value.len();
-                    if memory.compressed {
-                        stats.compressed_count += 1;
-                    }
-                    stats.importance_sum += memory.importance();
+        for (_, value) in iter.flatten() {
+            if let Ok(memory) = bincode::deserialize::<Memory>(&value) {
+                stats.total_count += 1;
+                stats.total_size_bytes += value.len();
+                if memory.compressed {
+                    stats.compressed_count += 1;
                 }
+                stats.importance_sum += memory.importance();
             }
         }
 

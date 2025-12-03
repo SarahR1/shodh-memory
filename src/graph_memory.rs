@@ -276,11 +276,9 @@ impl GraphMemory {
         let mut index = HashMap::new();
 
         let iter = entities_db.iterator(rocksdb::IteratorMode::Start);
-        for result in iter {
-            if let Ok((_, value)) = result {
-                if let Ok(entity) = bincode::deserialize::<EntityNode>(&value) {
-                    index.insert(entity.name.clone(), entity.uuid);
-                }
+        for (_, value) in iter.flatten() {
+            if let Ok(entity) = bincode::deserialize::<EntityNode>(&value) {
+                index.insert(entity.name.clone(), entity.uuid);
             }
         }
 
@@ -380,19 +378,17 @@ impl GraphMemory {
         let prefix = format!("{entity_uuid}:");
 
         let iter = self.entity_edges_db.prefix_iterator(prefix.as_bytes());
-        for item in iter {
-            if let Ok((key, _)) = item {
-                if let Ok(key_str) = std::str::from_utf8(&key) {
-                    if !key_str.starts_with(&prefix) {
-                        break;
-                    }
+        for (key, _) in iter.flatten() {
+            if let Ok(key_str) = std::str::from_utf8(&key) {
+                if !key_str.starts_with(&prefix) {
+                    break;
+                }
 
-                    // Extract edge UUID
-                    if let Some(edge_uuid_str) = key_str.split(':').nth(1) {
-                        if let Ok(edge_uuid) = Uuid::parse_str(edge_uuid_str) {
-                            if let Some(edge) = self.get_relationship(&edge_uuid)? {
-                                edges.push(edge);
-                            }
+                // Extract edge UUID
+                if let Some(edge_uuid_str) = key_str.split(':').nth(1) {
+                    if let Ok(edge_uuid) = Uuid::parse_str(edge_uuid_str) {
+                        if let Some(edge) = self.get_relationship(&edge_uuid)? {
+                            edges.push(edge);
                         }
                     }
                 }
@@ -457,19 +453,17 @@ impl GraphMemory {
 
         // Use inverted index: entity_uuid -> episode_uuids
         let iter = self.entity_episodes_db.prefix_iterator(prefix.as_bytes());
-        for item in iter {
-            if let Ok((key, _)) = item {
-                if let Ok(key_str) = std::str::from_utf8(&key) {
-                    if !key_str.starts_with(&prefix) {
-                        break; // Prefix iterator exhausted
-                    }
+        for (key, _) in iter.flatten() {
+            if let Ok(key_str) = std::str::from_utf8(&key) {
+                if !key_str.starts_with(&prefix) {
+                    break; // Prefix iterator exhausted
+                }
 
-                    // Extract episode UUID from key
-                    if let Some(episode_uuid_str) = key_str.split(':').nth(1) {
-                        if let Ok(episode_uuid) = Uuid::parse_str(episode_uuid_str) {
-                            if let Some(episode) = self.get_episode(&episode_uuid)? {
-                                episodes.push(episode);
-                            }
+                // Extract episode UUID from key
+                if let Some(episode_uuid_str) = key_str.split(':').nth(1) {
+                    if let Ok(episode_uuid) = Uuid::parse_str(episode_uuid_str) {
+                        if let Some(episode) = self.get_episode(&episode_uuid)? {
+                            episodes.push(episode);
                         }
                     }
                 }
@@ -592,11 +586,9 @@ impl GraphMemory {
         let mut entities = Vec::new();
 
         let iter = self.entities_db.iterator(rocksdb::IteratorMode::Start);
-        for result in iter {
-            if let Ok((_, value)) = result {
-                if let Ok(entity) = bincode::deserialize::<EntityNode>(&value) {
-                    entities.push(entity);
-                }
+        for (_, value) in iter.flatten() {
+            if let Ok(entity) = bincode::deserialize::<EntityNode>(&value) {
+                entities.push(entity);
             }
         }
 

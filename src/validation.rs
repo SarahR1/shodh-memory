@@ -9,7 +9,9 @@ pub const MAX_USER_ID_LENGTH: usize = 128;
 pub const MAX_CONTENT_LENGTH: usize = 50_000; // 50KB
 pub const MAX_PATTERN_LENGTH: usize = 256; // Max regex pattern length
 pub const MAX_ENTITY_LENGTH: usize = 256; // Max entity name length
+#[allow(unused)] // Public API - available for validation
 pub const MAX_METADATA_SIZE: usize = 10_000; // Max metadata JSON size (10KB)
+#[allow(unused)] // Public API - available for validation
 pub const MAX_ENTITIES_PER_MEMORY: usize = 50; // Max entities per memory
 
 /// Validate user_id
@@ -177,7 +179,7 @@ pub fn validate_and_compile_pattern(pattern: &str) -> Result<Regex> {
     }
 
     // Compile with default limits (regex crate has built-in size limits)
-    Regex::new(pattern).map_err(|e| anyhow!("Invalid regex pattern: {}", e))
+    Regex::new(pattern).map_err(|e| anyhow!("Invalid regex pattern: {e}"))
 }
 
 /// Validate entity name
@@ -208,6 +210,7 @@ pub fn validate_entity(entity: &str) -> Result<()> {
 }
 
 /// Validate entities list
+#[allow(unused)] // Public API - available for validation
 pub fn validate_entities(entities: &[String]) -> Result<()> {
     if entities.len() > MAX_ENTITIES_PER_MEMORY {
         return Err(anyhow!(
@@ -225,13 +228,12 @@ pub fn validate_entities(entities: &[String]) -> Result<()> {
 }
 
 /// Validate metadata JSON size
+#[allow(unused)] // Public API - available for validation
 pub fn validate_metadata(metadata: &serde_json::Value) -> Result<()> {
     let size = metadata.to_string().len();
     if size > MAX_METADATA_SIZE {
         return Err(anyhow!(
-            "Metadata too large: {} bytes (max: {})",
-            size,
-            MAX_METADATA_SIZE
+            "Metadata too large: {size} bytes (max: {MAX_METADATA_SIZE})"
         ));
     }
     Ok(())
@@ -355,7 +357,7 @@ mod tests {
         assert!(validate_entities(&valid).is_ok());
 
         // Too many entities
-        let too_many: Vec<String> = (0..100).map(|i| format!("entity{}", i)).collect();
+        let too_many: Vec<String> = (0..100).map(|i| format!("entity{i}")).collect();
         assert!(validate_entities(&too_many).is_err());
     }
 

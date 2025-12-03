@@ -6,10 +6,8 @@
 //! - 5-10x faster than competitors (Cognee, Mem0, ChromaDB)
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
-use shodh_memory::memory::{Experience, ExperienceType, MemoryConfig, MemorySystem, Query};
-use std::collections::HashMap;
+use shodh_memory::memory::{Experience, MemoryConfig, MemorySystem, Query};
 use std::fs;
-use std::path::Path;
 use tempfile::TempDir;
 
 /// Helper: Create test memory system
@@ -33,15 +31,8 @@ fn setup_memory_system() -> (MemorySystem, TempDir) {
 /// Helper: Create minimal Experience for benchmarks
 fn create_experience(content: &str) -> Experience {
     Experience {
-        experience_type: ExperienceType::Observation,
         content: content.to_string(),
-        context: None, // Skip complex RichContext for benchmarks
-        entities: vec![],
-        metadata: HashMap::new(),
-        embeddings: None, // Auto-generated
-        related_memories: vec![],
-        causal_chain: vec![],
-        outcomes: vec![],
+        ..Default::default()
     }
 }
 
@@ -49,10 +40,9 @@ fn create_experience(content: &str) -> Experience {
 fn populate_memories(memory_system: &mut MemorySystem, count: usize) {
     for i in 0..count {
         let content = format!(
-            "Memory entry {} - This is a test memory containing various information about task execution, \
+            "Memory entry {i} - This is a test memory containing various information about task execution, \
              decision making, and context tracking in the AI agent system. It includes references to \
-             files, commands, and observations that help build a comprehensive understanding.",
-            i
+             files, commands, and observations that help build a comprehensive understanding."
         );
 
         let experience = create_experience(&content);
@@ -101,7 +91,7 @@ fn bench_record_experience(c: &mut Criterion) {
     eprintln!("   ✅ MemorySystem created! Model loaded successfully.\n");
 
     for (label, content) in sizes {
-        eprintln!("   📊 Testing {} char message", label);
+        eprintln!("   📊 Testing {label} char message");
 
         group.bench_with_input(
             BenchmarkId::from_parameter(label),
@@ -138,12 +128,9 @@ fn bench_retrieve_memories(c: &mut Criterion) {
             b.iter(|| {
                 let query = Query {
                     query_text: Some("task execution debugging".to_string()),
-                    query_embedding: None,
-                    time_range: None,
-                    experience_types: None,
-                    importance_threshold: None,
                     max_results: k,
                     retrieval_mode: shodh_memory::memory::RetrievalMode::Hybrid,
+                    ..Default::default()
                 };
 
                 memory_system.retrieve(&query).expect("Failed to retrieve");
@@ -212,12 +199,10 @@ fn bench_vector_search(c: &mut Criterion) {
             b.iter(|| {
                 let query = Query {
                     query_text: Some("debugging system performance optimization".to_string()),
-                    query_embedding: None,
-                    time_range: None,
-                    experience_types: None,
                     importance_threshold: Some(0.5),
                     max_results: k,
                     retrieval_mode: shodh_memory::memory::RetrievalMode::Similarity,
+                    ..Default::default()
                 };
 
                 memory_system.retrieve(&query).expect("Failed to search");
@@ -263,7 +248,7 @@ fn bench_concurrent_operations(c: &mut Criterion) {
                 for i in 0..10 {
                     let memory_clone = Arc::clone(&shared_memory);
                     let handle = thread::spawn(move || {
-                        let content = format!("Concurrent message from thread {}", i);
+                        let content = format!("Concurrent message from thread {i}");
                         let experience = create_experience(&content);
 
                         let mut memory = memory_clone.lock().unwrap();
@@ -305,12 +290,9 @@ fn bench_end_to_end(c: &mut Criterion) {
             // Immediately retrieve related memories
             let query = Query {
                 query_text: Some("task dependencies module".to_string()),
-                query_embedding: None,
-                time_range: None,
-                experience_types: None,
-                importance_threshold: None,
                 max_results: 5,
                 retrieval_mode: shodh_memory::memory::RetrievalMode::Hybrid,
+                ..Default::default()
             };
 
             let results = memory_system.retrieve(&query).expect("Failed to retrieve");
@@ -348,7 +330,7 @@ const MAGENTA: &str = "\x1b[35m";
 
 /// Read criterion benchmark results from JSON
 fn read_criterion_result(benchmark_name: &str) -> Option<(f64, f64)> {
-    let path = format!("target/criterion/{}/new/estimates.json", benchmark_name);
+    let path = format!("target/criterion/{benchmark_name}/new/estimates.json");
     if let Ok(contents) = fs::read_to_string(&path) {
         if let Ok(json) = serde_json::from_str::<serde_json::Value>(&contents) {
             let median = json["median"]["point_estimate"].as_f64()?;
@@ -368,27 +350,27 @@ fn format_ms(ms: f64, target: f64) -> String {
     } else {
         "\x1b[31m" // RED
     };
-    format!("{}{:>7.2}ms{}", color, ms, RESET)
+    format!("{color}{ms:>7.2}ms{RESET}")
 }
 
 /// Print comprehensive performance summary for VC presentations
 fn print_performance_summary() {
-    println!("\n{}", BOLD);
+    println!("\n{BOLD}");
 
     // Shodh ASCII Logo
     println!("╔══════════════════════════════════════════════════════════════════════════════════════════════╗");
     println!("║                                                                                              ║");
-    println!("║   {}███████╗██╗  ██╗ ██████╗ ██████╗ ██╗  ██╗{}      {}███╗   ███╗███████╗███╗   ███╗ ██████╗ ██████╗ ██╗   ██╗{}  ║", CYAN, RESET, MAGENTA, RESET);
-    println!("║   {}██╔════╝██║  ██║██╔═══██╗██╔══██╗██║  ██║{}      {}████╗ ████║██╔════╝████╗ ████║██╔═══██╗██╔══██╗╚██╗ ██╔╝{}  ║", CYAN, RESET, MAGENTA, RESET);
-    println!("║   {}███████╗███████║██║   ██║██║  ██║███████║{}█████╗{}██╔████╔██║█████╗  ██╔████╔██║██║   ██║██████╔╝ ╚████╔╝{} ║", CYAN, RESET, MAGENTA, RESET);
-    println!("║   {}╚════██║██╔══██║██║   ██║██║  ██║██╔══██║{}      {}██║╚██╔╝██║██╔══╝  ██║╚██╔╝██║██║   ██║██╔══██╗  ╚██╔╝{}   ║", CYAN, RESET, MAGENTA, RESET);
-    println!("║   {}███████║██║  ██║╚██████╔╝██████╔╝██║  ██║{}      {}██║ ╚═╝ ██║███████╗██║ ╚═╝ ██║╚██████╔╝██║  ██║   ██║{}    ║", CYAN, RESET, MAGENTA, RESET);
-    println!("║   {}╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝{}      {}╚═╝     ╚═╝╚══════╝╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝{}    ║", CYAN, RESET, MAGENTA, RESET);
+    println!("║   {CYAN}███████╗██╗  ██╗ ██████╗ ██████╗ ██╗  ██╗{RESET}      {MAGENTA}███╗   ███╗███████╗███╗   ███╗ ██████╗ ██████╗ ██╗   ██╗{RESET}  ║");
+    println!("║   {CYAN}██╔════╝██║  ██║██╔═══██╗██╔══██╗██║  ██║{RESET}      {MAGENTA}████╗ ████║██╔════╝████╗ ████║██╔═══██╗██╔══██╗╚██╗ ██╔╝{RESET}  ║");
+    println!("║   {CYAN}███████╗███████║██║   ██║██║  ██║███████║{RESET}█████╗{MAGENTA}██╔████╔██║█████╗  ██╔████╔██║██║   ██║██████╔╝ ╚████╔╝{RESET} ║");
+    println!("║   {CYAN}╚════██║██╔══██║██║   ██║██║  ██║██╔══██║{RESET}      {MAGENTA}██║╚██╔╝██║██╔══╝  ██║╚██╔╝██║██║   ██║██╔══██╗  ╚██╔╝{RESET}   ║");
+    println!("║   {CYAN}███████║██║  ██║╚██████╔╝██████╔╝██║  ██║{RESET}      {MAGENTA}██║ ╚═╝ ██║███████╗██║ ╚═╝ ██║╚██████╔╝██║  ██║   ██║{RESET}    ║");
+    println!("║   {CYAN}╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚═╝  ╚═╝{RESET}      {MAGENTA}╚═╝     ╚═╝╚══════╝╚═╝     ╚═╝ ╚═════╝ ╚═╝  ╚═╝   ╚═╝{RESET}    ║");
     println!("║                                                                                              ║");
-    println!("║                      {}Local-First AI Memory System for Edge Computing{}                        ║", BOLD, RESET);
-    println!("║                        {}Production-Grade Responsiveness Benchmarks{}                            ║", YELLOW, RESET);
+    println!("║                      {BOLD}Local-First AI Memory System for Edge Computing{RESET}                        ║");
+    println!("║                        {YELLOW}Production-Grade Responsiveness Benchmarks{RESET}                            ║");
     println!("╚══════════════════════════════════════════════════════════════════════════════════════════════╝");
-    println!("{}", RESET);
+    println!("{RESET}");
     println!();
 
     // Read actual benchmark results
@@ -398,20 +380,20 @@ fn print_performance_summary() {
     let concurrent = read_criterion_result("concurrent_record_10_threads");
 
     // Performance results table with ACTUAL measurements
-    println!("{}╔═══════════════════════════════════════════════════════════════════════════════════════════════╗{}", BOLD, RESET);
-    println!("║                              {}⚡ LIVE PERFORMANCE RESULTS{} ⚡                                     ║", YELLOW, RESET);
+    println!("{BOLD}╔═══════════════════════════════════════════════════════════════════════════════════════════════╗{RESET}");
+    println!("║                              {YELLOW}⚡ LIVE PERFORMANCE RESULTS{RESET} ⚡                                     ║");
     println!("╠═══════════════════════════════════════════════════════════════════════════════════════════════╣");
-    println!("║ {}OPERATION                    │  P50 ACTUAL │ P50 TARGET │  STATUS  │  USER EXPERIENCE{}       ║", BOLD, RESET);
+    println!("║ {BOLD}OPERATION                    │  P50 ACTUAL │ P50 TARGET │  STATUS  │  USER EXPERIENCE{RESET}       ║");
     println!("╠═══════════════════════════════════════════════════════════════════════════════════════════════╣");
 
     // Retrieve
     if let Some((p50, _)) = retrieve_25 {
         let status = if p50 < 5.0 {
-            format!("{}✅ PERFECT{}", GREEN, RESET)
+            format!("{GREEN}✅ PERFECT{RESET}")
         } else if p50 < 10.0 {
-            format!("{}✅ GREAT{}", GREEN, RESET)
+            format!("{GREEN}✅ GREAT{RESET}")
         } else {
-            format!("{}⚠ NEEDS WORK{}", YELLOW, RESET)
+            format!("{YELLOW}⚠ NEEDS WORK{RESET}")
         };
         println!(
             "║ Memory Retrieve (k=5)        │ {}  │   < 5ms    │ {}  │  Imperceptible lag     ║",
@@ -425,11 +407,11 @@ fn print_performance_summary() {
     // Record
     if let Some((p50, _)) = record_100 {
         let status = if p50 < 10.0 {
-            format!("{}✅ PERFECT{}", GREEN, RESET)
+            format!("{GREEN}✅ PERFECT{RESET}")
         } else if p50 < 20.0 {
-            format!("{}✅ GOOD{}", GREEN, RESET)
+            format!("{GREEN}✅ GOOD{RESET}")
         } else {
-            format!("{}⚠ NEEDS WORK{}", YELLOW, RESET)
+            format!("{YELLOW}⚠ NEEDS WORK{RESET}")
         };
         println!(
             "║ Memory Record (100 chars)    │ {}  │   < 10ms   │ {}  │  Instant feel          ║",
@@ -443,11 +425,11 @@ fn print_performance_summary() {
     // End-to-End
     if let Some((p50, _)) = end_to_end {
         let status = if p50 < 15.0 {
-            format!("{}✅ PERFECT{}", GREEN, RESET)
+            format!("{GREEN}✅ PERFECT{RESET}")
         } else if p50 < 30.0 {
-            format!("{}✅ GOOD{}", GREEN, RESET)
+            format!("{GREEN}✅ GOOD{RESET}")
         } else {
-            format!("{}⚠ NEEDS WORK{}", YELLOW, RESET)
+            format!("{YELLOW}⚠ NEEDS WORK{RESET}")
         };
         println!(
             "║ End-to-End (Record+Retrieve) │ {}  │   < 15ms   │ {}  │  Smooth, responsive    ║",
@@ -461,11 +443,11 @@ fn print_performance_summary() {
     // Concurrent
     if let Some((p50, _)) = concurrent {
         let status = if p50 < 50.0 {
-            format!("{}✅ PERFECT{}", GREEN, RESET)
+            format!("{GREEN}✅ PERFECT{RESET}")
         } else if p50 < 100.0 {
-            format!("{}✅ GOOD{}", GREEN, RESET)
+            format!("{GREEN}✅ GOOD{RESET}")
         } else {
-            format!("{}⚠ NEEDS WORK{}", YELLOW, RESET)
+            format!("{YELLOW}⚠ NEEDS WORK{RESET}")
         };
         println!(
             "║ Concurrent (10 threads)      │ {}  │   < 50ms   │ {}  │  Multi-user ready      ║",
@@ -520,14 +502,14 @@ fn print_performance_summary() {
 
     // Human perception thresholds
     println!("╔═══════════════════════════════════════════════════════════════════════════════════════════════╗");
-    println!("║                        {}HUMAN PERCEPTION THRESHOLDS{}                                           ║", BOLD, RESET);
+    println!("║                        {BOLD}HUMAN PERCEPTION THRESHOLDS{RESET}                                           ║");
     println!("╠═══════════════════════════════════════════════════════════════════════════════════════════════╣");
     println!("║                                                                                               ║");
-    println!("║  {}< 5ms   → PERFECT{}:          No perceivable lag whatsoever                                   ║", GREEN, RESET);
-    println!("║  {}< 20ms  → EXCELLENT{}:        Imperceptible to human perception                               ║", GREEN, RESET);
-    println!("║  {}< 100ms → GOOD{}:             Feels instant (industry standard)                               ║", GREEN, RESET);
-    println!("║  {}< 200ms → ACCEPTABLE{}:       Noticeable but smooth                                           ║", YELLOW, RESET);
-    println!("║  > 200ms → {}NEEDS WORK{}:       Perceived as slow, requires optimization                        ║", YELLOW, RESET);
+    println!("║  {GREEN}< 5ms   → PERFECT{RESET}:          No perceivable lag whatsoever                                   ║");
+    println!("║  {GREEN}< 20ms  → EXCELLENT{RESET}:        Imperceptible to human perception                               ║");
+    println!("║  {GREEN}< 100ms → GOOD{RESET}:             Feels instant (industry standard)                               ║");
+    println!("║  {YELLOW}< 200ms → ACCEPTABLE{RESET}:       Noticeable but smooth                                           ║");
+    println!("║  > 200ms → {YELLOW}NEEDS WORK{RESET}:       Perceived as slow, requires optimization                        ║");
     println!("║                                                                                               ║");
     println!("║  \"Responsiveness isn't a feature, it's the foundation.\"                                      ║");
     println!("║  Every millisecond counts in user experience.                                                ║");
@@ -537,22 +519,22 @@ fn print_performance_summary() {
 
     // Competitive advantages
     println!("╔═══════════════════════════════════════════════════════════════════════════════════════════════╗");
-    println!("║                           {}COMPETITIVE ADVANTAGES{} 🚀                                            ║", BOLD, RESET);
+    println!("║                           {BOLD}COMPETITIVE ADVANTAGES{RESET} 🚀                                            ║");
     println!("╠═══════════════════════════════════════════════════════════════════════════════════════════════╣");
     println!("║                                                                                               ║");
-    println!("║  {}vs. Cloud-Based Systems (Cognee, Mem0){}                                                      ║", CYAN, RESET);
+    println!("║  {CYAN}vs. Cloud-Based Systems (Cognee, Mem0){RESET}                                                      ║");
     println!("║    ✓ Zero network latency (100% offline)                                                     ║");
     println!("║    ✓ No API rate limits or quotas                                                            ║");
     println!("║    ✓ Full data privacy (never leaves device)                                                 ║");
     println!("║    ✓ Works without internet connectivity                                                     ║");
     println!("║                                                                                               ║");
-    println!("║  {}vs. Client-Server Systems (ChromaDB, Weaviate){}                                              ║", CYAN, RESET);
+    println!("║  {CYAN}vs. Client-Server Systems (ChromaDB, Weaviate){RESET}                                              ║");
     println!("║    ✓ No IPC/serialization overhead                                                           ║");
     println!("║    ✓ Zero-copy memory sharing (Arc<T>)                                                       ║");
     println!("║    ✓ Three-tier cache hierarchy                                                              ║");
     println!("║    ✓ Cache-aware retrieval (NEW!)                                                            ║");
     println!("║                                                                                               ║");
-    println!("║  {}Performance Multiplier: 5-10x faster for cached data{}                                        ║", GREEN, RESET);
+    println!("║  {GREEN}Performance Multiplier: 5-10x faster for cached data{RESET}                                        ║");
     println!("║                                                                                               ║");
     println!("╚═══════════════════════════════════════════════════════════════════════════════════════════════╝");
     println!();
@@ -591,19 +573,19 @@ fn print_performance_summary() {
 
     // Cache-aware retrieval highlight
     println!("╔═══════════════════════════════════════════════════════════════════════════════════════════════╗");
-    println!("║                           {}🎯 CACHE-AWARE RETRIEVAL (NEW!){} 🎯                                    ║", MAGENTA, RESET);
+    println!("║                           {MAGENTA}🎯 CACHE-AWARE RETRIEVAL (NEW!){RESET} 🎯                                    ║");
     println!("╠═══════════════════════════════════════════════════════════════════════════════════════════════╣");
     println!("║                                                                                               ║");
-    println!("║  {}Three-Tier Hierarchy{}:  Working Memory → Session Memory → RocksDB Storage                    ║", CYAN, RESET);
+    println!("║  {CYAN}Three-Tier Hierarchy{RESET}:  Working Memory → Session Memory → RocksDB Storage                    ║");
     println!("║                                                                                               ║");
-    println!("║  {}Zero-Copy Access{}:      Arc::clone() for cached data (2-3 CPU cycles)                        ║", GREEN, RESET);
-    println!("║  {}Deserialization{}:       Only when cache misses (cold path)                                   ║", YELLOW, RESET);
+    println!("║  {GREEN}Zero-Copy Access{RESET}:      Arc::clone() for cached data (2-3 CPU cycles)                        ║");
+    println!("║  {YELLOW}Deserialization{RESET}:       Only when cache misses (cold path)                                   ║");
     println!("║                                                                                               ║");
-    println!("║  {}Expected Speedup{}:      5-10x faster for hot data                                            ║", GREEN, RESET);
-    println!("║  {}Cache Hit Rate{}:        ~100% for recent memories (working capacity: 100)                    ║", GREEN, RESET);
+    println!("║  {GREEN}Expected Speedup{RESET}:      5-10x faster for hot data                                            ║");
+    println!("║  {GREEN}Cache Hit Rate{RESET}:        ~100% for recent memories (working capacity: 100)                    ║");
     println!("║                                                                                               ║");
     println!("║  Previous: Vector Search → RocksDB (always deserialize)                                      ║");
-    println!("║  {}Now{}:      Vector Search → Working → Session → RocksDB (cache first!)                        ║", GREEN, RESET);
+    println!("║  {GREEN}Now{RESET}:      Vector Search → Working → Session → RocksDB (cache first!)                        ║");
     println!("║                                                                                               ║");
     println!("╚═══════════════════════════════════════════════════════════════════════════════════════════════╝");
     println!();
@@ -634,11 +616,11 @@ fn print_performance_summary() {
     // Footer
     println!("╔═══════════════════════════════════════════════════════════════════════════════════════════════╗");
     println!("║                                                                                               ║");
-    println!("║                     {}Detailed results:{}  target/criterion/report/index.html                      ║", CYAN, RESET);
-    println!("║                     {}Run benchmarks:{}   cargo bench --bench memory_benchmarks                  ║", CYAN, RESET);
+    println!("║                     {CYAN}Detailed results:{RESET}  target/criterion/report/index.html                      ║");
+    println!("║                     {CYAN}Run benchmarks:{RESET}   cargo bench --bench memory_benchmarks                  ║");
     println!("║                                                                                               ║");
-    println!("║                     {}Learn more:{}       https://shodh-rag.com                                    ║", MAGENTA, RESET);
-    println!("║                     {}GitHub:{}           https://github.com/roshera/shodh-memory                ║", MAGENTA, RESET);
+    println!("║                     {MAGENTA}Learn more:{RESET}       https://shodh-rag.com                                    ║");
+    println!("║                     {MAGENTA}GitHub:{RESET}           https://github.com/roshera/shodh-memory                ║");
     println!("║                                                                                               ║");
     println!("╚═══════════════════════════════════════════════════════════════════════════════════════════════╝");
     println!();
@@ -666,7 +648,7 @@ fn bench_cache_performance(c: &mut Criterion) {
     record_group.bench_function("cold_no_cache", |b| {
         b.iter(|| {
             let counter = cold_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let exp = create_experience(&format!("Unique content iteration {}", counter));
+            let exp = create_experience(&format!("Unique content iteration {counter}"));
             memory_system.record(exp).expect("Failed to record");
         });
     });
@@ -700,13 +682,10 @@ fn bench_cache_performance(c: &mut Criterion) {
         b.iter(|| {
             let counter = retrieve_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let query = Query {
-                query_text: Some(format!("Unique query iteration {}", counter)),
-                query_embedding: None,
-                time_range: None,
-                experience_types: None,
-                importance_threshold: None,
+                query_text: Some(format!("Unique query iteration {counter}")),
                 max_results: 5,
                 retrieval_mode: shodh_memory::memory::RetrievalMode::Hybrid,
+                ..Default::default()
             };
             memory_system.retrieve(&query).expect("Failed to retrieve");
         });
@@ -716,12 +695,9 @@ fn bench_cache_performance(c: &mut Criterion) {
     for _ in 0..5 {
         let query = Query {
             query_text: Some("obstacles nearby in warehouse".to_string()),
-            query_embedding: None,
-            time_range: None,
-            experience_types: None,
-            importance_threshold: None,
             max_results: 5,
             retrieval_mode: shodh_memory::memory::RetrievalMode::Hybrid,
+            ..Default::default()
         };
         let _ = memory_system.retrieve(&query);
     }
@@ -731,12 +707,9 @@ fn bench_cache_performance(c: &mut Criterion) {
         b.iter(|| {
             let query = Query {
                 query_text: Some("obstacles nearby in warehouse".to_string()),
-                query_embedding: None,
-                time_range: None,
-                experience_types: None,
-                importance_threshold: None,
                 max_results: 5,
                 retrieval_mode: shodh_memory::memory::RetrievalMode::Hybrid,
+                ..Default::default()
             };
             memory_system.retrieve(&query).expect("Failed to retrieve");
         });

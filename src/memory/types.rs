@@ -490,6 +490,49 @@ pub struct Experience {
     pub tags: Vec<String>,
 }
 
+impl Default for Experience {
+    fn default() -> Self {
+        Self {
+            experience_type: ExperienceType::Observation,
+            content: String::new(),
+            context: None,
+            entities: Vec::new(),
+            metadata: HashMap::new(),
+            embeddings: None,
+            related_memories: Vec::new(),
+            causal_chain: Vec::new(),
+            outcomes: Vec::new(),
+            robot_id: None,
+            mission_id: None,
+            geo_location: None,
+            local_position: None,
+            heading: None,
+            action_type: None,
+            reward: None,
+            sensor_data: HashMap::new(),
+            decision_context: None,
+            action_params: None,
+            outcome_type: None,
+            outcome_details: None,
+            confidence: None,
+            alternatives_considered: Vec::new(),
+            weather: None,
+            terrain_type: None,
+            lighting: None,
+            nearby_agents: Vec::new(),
+            is_failure: false,
+            is_anomaly: false,
+            severity: None,
+            recovery_action: None,
+            root_cause: None,
+            pattern_id: None,
+            predicted_outcome: None,
+            prediction_accurate: None,
+            tags: Vec::new(),
+        }
+    }
+}
+
 /// Mutable metadata for memory (interior mutability)
 /// Separated from immutable core data to enable zero-copy updates via Arc<Memory>
 #[derive(Debug, Clone, Serialize, Deserialize)]

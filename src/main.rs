@@ -84,17 +84,15 @@ impl MultiUserMemoryManagerRotationHelper {
 
         // Collect all events for this user with their timestamps
         let iter = self.audit_db.prefix_iterator(prefix.as_bytes());
-        for item in iter {
-            if let Ok((key, value)) = item {
-                if let Ok(key_str) = std::str::from_utf8(&key) {
-                    if !key_str.starts_with(&prefix) {
-                        break;
-                    }
+        for (key, value) in iter.flatten() {
+            if let Ok(key_str) = std::str::from_utf8(&key) {
+                if !key_str.starts_with(&prefix) {
+                    break;
+                }
 
-                    if let Ok(event) = bincode::deserialize::<AuditEvent>(&value) {
-                        let timestamp_nanos = event.timestamp.timestamp_nanos_opt().unwrap_or(0);
-                        events.push((key.to_vec(), event, timestamp_nanos));
-                    }
+                if let Ok(event) = bincode::deserialize::<AuditEvent>(&value) {
+                    let timestamp_nanos = event.timestamp.timestamp_nanos_opt().unwrap_or(0);
+                    events.push((key.to_vec(), event, timestamp_nanos));
                 }
             }
         }
@@ -318,18 +316,16 @@ impl MultiUserMemoryManager {
         let prefix = format!("{user_id}:");
 
         let iter = self.audit_db.prefix_iterator(prefix.as_bytes());
-        for item in iter {
-            if let Ok((key, value)) = item {
-                // Check if key still matches our user_id prefix
-                if let Ok(key_str) = std::str::from_utf8(&key) {
-                    if !key_str.starts_with(&prefix) {
-                        break; // Moved past our user's events
-                    }
+        for (key, value) in iter.flatten() {
+            // Check if key still matches our user_id prefix
+            if let Ok(key_str) = std::str::from_utf8(&key) {
+                if !key_str.starts_with(&prefix) {
+                    break; // Moved past our user's events
+                }
 
-                    // Deserialize event
-                    if let Ok(event) = bincode::deserialize::<AuditEvent>(&value) {
-                        events.push(event);
-                    }
+                // Deserialize event
+                if let Ok(event) = bincode::deserialize::<AuditEvent>(&value) {
+                    events.push(event);
                 }
             }
         }
@@ -571,12 +567,10 @@ impl MultiUserMemoryManager {
         let mut user_ids = std::collections::HashSet::new();
         let iter = self.audit_db.iterator(rocksdb::IteratorMode::Start);
 
-        for item in iter {
-            if let Ok((key, _)) = item {
-                if let Ok(key_str) = std::str::from_utf8(&key) {
-                    if let Some(user_id) = key_str.split(':').next() {
-                        user_ids.insert(user_id.to_string());
-                    }
+        for (key, _) in iter.flatten() {
+            if let Ok(key_str) = std::str::from_utf8(&key) {
+                if let Some(user_id) = key_str.split(':').next() {
+                    user_ids.insert(user_id.to_string());
                 }
             }
         }
@@ -787,7 +781,7 @@ struct HealthResponse {
 /// Application state
 type AppState = Arc<MultiUserMemoryManager>;
 
-/// REST API handlers
+// REST API handlers
 
 /// Health check endpoint (basic compatibility)
 async fn health(State(state): State<AppState>) -> Json<HealthResponse> {

@@ -22,7 +22,7 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tracing::debug;
 use uuid::Uuid;
@@ -929,7 +929,7 @@ impl MemorySystem {
     fn forget_by_pattern(&mut self, pattern: &str) -> Result<usize> {
         // Use validated pattern compilation with ReDoS protection
         let regex = crate::validation::validate_and_compile_pattern(pattern)
-            .map_err(|e| anyhow::anyhow!("Invalid pattern: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Invalid pattern: {e}"))?;
         let mut count = 0;
 
         // Remove from all tiers
@@ -994,12 +994,12 @@ impl MemorySystem {
     }
 
     /// Save vector index to disk (shutdown persistence)
-    pub fn save_vector_index(&self, path: &PathBuf) -> Result<()> {
+    pub fn save_vector_index(&self, path: &Path) -> Result<()> {
         self.retriever.save_index(path)
     }
 
     /// Load vector index from disk (startup restoration)
-    pub fn load_vector_index(&self, path: &PathBuf) -> Result<()> {
+    pub fn load_vector_index(&self, path: &Path) -> Result<()> {
         self.retriever.load_index(path)
     }
 

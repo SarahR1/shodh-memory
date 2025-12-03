@@ -60,6 +60,7 @@ impl Default for ServerConfig {
 
 impl ServerConfig {
     /// Load configuration from environment variables with defaults
+    #[allow(clippy::field_reassign_with_default)] // Environment overrides require mutable config
     pub fn from_env() -> Self {
         let mut config = Self::default();
 
@@ -150,6 +151,7 @@ impl ServerConfig {
 }
 
 /// Environment variable documentation
+#[allow(unused)] // Public API - available for CLI help output
 pub fn print_env_help() {
     println!("Shodh-Memory Configuration Environment Variables:");
     println!();

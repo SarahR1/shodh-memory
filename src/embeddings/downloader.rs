@@ -15,7 +15,7 @@
 use anyhow::{Context, Result};
 use std::fs;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 /// URLs for model files (hosted on HuggingFace)
@@ -118,7 +118,7 @@ fn download_file(
     // Use ureq for simple HTTP downloads (blocking, no async runtime needed)
     let response = ureq::get(url)
         .call()
-        .context(format!("Failed to download from {}", url))?;
+        .context(format!("Failed to download from {url}"))?;
 
     let total_size = response
         .header("content-length")
@@ -250,7 +250,7 @@ pub fn download_onnx_runtime(progress: Option<ProgressCallback>) -> Result<PathB
 }
 
 /// Extract ONNX Runtime from archive
-fn extract_onnx_runtime(archive_path: &PathBuf, dest_dir: &PathBuf) -> Result<()> {
+fn extract_onnx_runtime(archive_path: &Path, dest_dir: &Path) -> Result<()> {
     tracing::info!("Extracting ONNX Runtime from {:?}", archive_path);
 
     #[cfg(target_os = "windows")]
@@ -341,18 +341,18 @@ pub fn print_status() {
     let onnx_downloaded = is_onnx_runtime_downloaded();
 
     println!("Shodh-Memory Cache Status:");
-    println!("  Cache directory: {:?}", cache_dir);
-    println!("  Models downloaded: {}", models_downloaded);
-    println!("  ONNX Runtime downloaded: {}", onnx_downloaded);
+    println!("  Cache directory: {cache_dir:?}");
+    println!("  Models downloaded: {models_downloaded}");
+    println!("  ONNX Runtime downloaded: {onnx_downloaded}");
 
     if models_downloaded {
         let models_dir = get_models_dir();
-        println!("  Model path: {:?}", models_dir);
+        println!("  Model path: {models_dir:?}");
     }
 
     if onnx_downloaded {
         if let Some(path) = get_onnx_runtime_path() {
-            println!("  ONNX Runtime path: {:?}", path);
+            println!("  ONNX Runtime path: {path:?}");
         }
     }
 }

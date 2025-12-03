@@ -115,7 +115,7 @@ impl EmbeddingConfig {
                     .find(|p| {
                         p.join("model_quantized.onnx").exists() || p.join("model.onnx").exists()
                     })
-                    .unwrap_or_else(|| super::downloader::get_models_dir()) // Default to cache dir
+                    .unwrap_or_else(super::downloader::get_models_dir) // Default to cache dir
             });
 
         let embed_timeout_ms = std::env::var("SHODH_EMBED_TIMEOUT_MS")
@@ -509,11 +509,11 @@ impl MiniLMEmbedder {
         let mut pooled = vec![0.0; self.dimension];
         let mut mask_sum = 0.0;
 
-        for seq_idx in 0..max_length {
-            if attention[seq_idx] == 1 {
-                for dim_idx in 0..self.dimension {
+        for (seq_idx, &att) in attention.iter().enumerate() {
+            if att == 1 {
+                for (dim_idx, pooled_val) in pooled.iter_mut().enumerate() {
                     let idx = seq_idx * self.dimension + dim_idx;
-                    pooled[dim_idx] += output_data[idx];
+                    *pooled_val += output_data[idx];
                 }
                 mask_sum += 1.0;
             }
