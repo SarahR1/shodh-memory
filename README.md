@@ -261,6 +261,7 @@ Apache 2.0
 
 ## Links
 
+- [Website](https://shodh-rag.com/memory)
 - [PyPI Package](https://pypi.org/project/shodh-memory/)
 - [GitHub](https://github.com/varun29ankuS/shodh-memory)
 - [Issues](https://github.com/varun29ankuS/shodh-memory/issues)

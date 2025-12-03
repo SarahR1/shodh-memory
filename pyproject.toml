@@ -32,9 +32,10 @@ keywords = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/varun29ankuS/shodh-memory"
+Homepage = "https://shodh-rag.com/memory"
 Repository = "https://github.com/varun29ankuS/shodh-memory"
-Documentation = "https://github.com/varun29ankuS/shodh-memory#readme"
+Documentation = "https://shodh-rag.com/memory"
+"Bug Tracker" = "https://github.com/varun29ankuS/shodh-memory/issues"
 
 [tool.maturin]
 features = ["python"]
