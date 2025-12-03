@@ -5,10 +5,10 @@
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=-crt-static"]
 
-[build]
-target = "x86_64-pc-windows-msvc"
+# Note: Do NOT set [build] target globally - breaks cross-platform CI
+# Windows builds will use the native target automatically
 
-[env]
+[target.x86_64-pc-windows-msvc.env]
 # Force CMake to use Visual Studio generator instead of auto-detecting
 # This prevents conflicts when both Ninja and Visual Studio are installed
 CMAKE_GENERATOR = "Visual Studio 17 2022"
