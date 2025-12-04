@@ -660,28 +660,30 @@ impl MultiUserMemoryManager {
         let graph = self.get_user_graph(user_id)?;
         let graph_guard = graph.write();
 
-        // Extract entities from the experience content
-        let extracted_entities = self.entity_extractor.extract(&experience.content);
+        // Extract entities from the experience content with salience information
+        let extracted_entities = self.entity_extractor.extract_with_salience(&experience.content);
 
         let mut entity_uuids = Vec::new();
 
-        // Add entities to the graph
-        for (entity_name, entity_label) in extracted_entities {
+        // Add entities to the graph with salience scoring
+        for extracted in extracted_entities {
             let entity = EntityNode {
                 uuid: uuid::Uuid::new_v4(), // Will be replaced if exists
-                name: entity_name.clone(),
-                labels: vec![entity_label],
+                name: extracted.name.clone(),
+                labels: vec![extracted.label],
                 created_at: chrono::Utc::now(),
                 last_seen_at: chrono::Utc::now(),
                 mention_count: 1,
                 summary: String::new(),
                 attributes: HashMap::new(),
                 name_embedding: None,
+                salience: extracted.base_salience,
+                is_proper_noun: extracted.is_proper_noun,
             };
 
             match graph_guard.add_entity(entity) {
-                Ok(uuid) => entity_uuids.push((entity_name, uuid)),
-                Err(e) => tracing::debug!("Failed to add entity {}: {}", entity_name, e),
+                Ok(uuid) => entity_uuids.push((extracted.name, uuid)),
+                Err(e) => tracing::debug!("Failed to add entity {}: {}", extracted.name, e),
             }
         }
 
@@ -754,8 +756,10 @@ struct RecordResponse {
 #[derive(Debug, Deserialize)]
 struct RetrieveRequest {
     user_id: String,
+    #[serde(alias = "query")]
     query_text: Option<String>,
     query_embedding: Option<Vec<f32>>,
+    #[serde(alias = "limit")]
     max_results: Option<usize>,
     importance_threshold: Option<f32>,
 }
@@ -1030,99 +1034,124 @@ async fn retrieve_memories(
                 ..Default::default()
             };
 
-            // Check if we should use graph-aware retrieval
+            // HYBRID RETRIEVAL: Semantic + Graph Boost
+            // 1. Semantic similarity is the base score (content matching)
+            // 2. Graph activation provides boost for entity-related memories
+            // Formula: final_score = semantic_score * (1.0 + graph_boost)
             let memories: Vec<Memory> = if let Some(ref query_text) = query_text {
-                // GRAPH-AWARE RETRIEVAL (Anderson & Pirolli 1984 + Xiong et al. 2017)
-                let graph = state_clone
-                    .get_user_graph(&user_id)
+                // Step 1: Generate query embedding
+                let query_embedding = memory_guard
+                    .get_embedder()
+                    .encode(query_text)
                     .map_err(AppError::Internal)?;
-                let graph_guard = graph.read();
 
-                // Use spreading activation retrieval
-                use memory::graph_retrieval::spreading_activation_retrieve;
+                // Step 2: Extract entities from query for graph lookup
+                let query_entities = state_clone.entity_extractor.extract(query_text);
 
-                let activated = spreading_activation_retrieve(
-                    query_text,
-                    &query,
-                    &graph_guard,
-                    memory_guard.get_embedder(),
-                    |episode| {
-                        // Convert episode to memory
-                        // Find memory with matching content
-                        // This is a temporary bridge - we should store episode_id in Memory
-                        let all_memories = memory_guard.get_all_memories()?;
-                        for mem in all_memories {
-                            if mem.experience.content == episode.content {
-                                return Ok(Some(mem));
+                // Step 3: Build entity activation map from graph
+                // This gives us activated memory IDs and their graph scores
+                let mut memory_graph_boosts: std::collections::HashMap<uuid::Uuid, f32> =
+                    std::collections::HashMap::new();
+
+                if !query_entities.is_empty() {
+                    if let Ok(graph) = state_clone.get_user_graph(&user_id) {
+                        let graph_guard = graph.read();
+
+                        // For each query entity, find related memories through graph
+                        // Use SALIENCE for boost - high-salience entities (gravitational wells) provide stronger boost
+                        for (entity_name, _) in &query_entities {
+                            if let Ok(Some(entity_node)) = graph_guard.find_entity_by_name(entity_name) {
+                                // Get episodes (memories) connected to this entity
+                                if let Ok(episodes) = graph_guard.get_episodes_by_entity(&entity_node.uuid) {
+                                    for episode in episodes {
+                                        // Boost = entity salience * 0.5 (high-salience entities give stronger boost)
+                                        // A salience of 1.0 gives 50% boost, salience of 0.3 gives 15% boost
+                                        let boost = entity_node.salience * 0.5;
+                                        *memory_graph_boosts.entry(episode.uuid).or_insert(0.0) += boost;
+                                    }
+                                }
+
+                                // Also traverse 1-hop relationships for indirect activation
+                                // Indirect connections are weighted by edge strength AND connected entity salience
+                                if let Ok(edges) = graph_guard.get_entity_relationships(&entity_node.uuid) {
+                                    for edge in edges {
+                                        let connected_uuid = if edge.from_entity == entity_node.uuid {
+                                            edge.to_entity
+                                        } else {
+                                            edge.from_entity
+                                        };
+
+                                        // Get connected entity's salience for weighting
+                                        let connected_salience = graph_guard
+                                            .get_entity(&connected_uuid)
+                                            .ok()
+                                            .flatten()
+                                            .map(|e| e.salience)
+                                            .unwrap_or(0.3);
+
+                                        if let Ok(connected_episodes) = graph_guard.get_episodes_by_entity(&connected_uuid) {
+                                            for episode in connected_episodes {
+                                                // Decayed boost: edge_strength * connected_salience * decay_factor
+                                                let boost = edge.strength * connected_salience * 0.3;
+                                                *memory_graph_boosts.entry(episode.uuid).or_insert(0.0) += boost;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
-                        Ok(None)
-                    },
-                )
-                .map_err(AppError::Internal)?;
+                    }
+                }
 
-                // Convert ActivatedMemory to Memory with scores
-                let graph_results: Vec<Memory> = activated
+                // Step 4: Get all memories and compute hybrid scores
+                let all_memories = memory_guard
+                    .get_all_memories()
+                    .map_err(AppError::Internal)?;
+
+                // Step 5: Score each memory by semantic + graph boost
+                let mut scored_memories: Vec<(f32, Memory)> = all_memories
                     .into_iter()
-                    .map(|am| {
-                        let mut mem = (*am.memory).clone();
-                        mem.score = Some(am.final_score);
-                        mem
+                    .filter_map(|shared_mem| {
+                        let memory = (*shared_mem).clone();
+
+                        // Get embedding
+                        let mem_embedding = if let Some(emb) = &memory.experience.embeddings {
+                            emb.clone()
+                        } else {
+                            return None;
+                        };
+
+                        // Compute cosine similarity (base score)
+                        let semantic_score = cosine_similarity(&query_embedding, &mem_embedding);
+
+                        // Get graph boost (if any)
+                        let graph_boost = memory_graph_boosts
+                            .get(&uuid::Uuid::parse_str(&memory.id.0.to_string()).unwrap_or_default())
+                            .copied()
+                            .unwrap_or(0.0)
+                            .min(1.0); // Cap boost at 100%
+
+                        // Hybrid score: semantic * (1 + graph_boost)
+                        // This ensures semantic match is primary, graph only boosts
+                        let final_score = semantic_score * (1.0 + graph_boost);
+
+                        Some((final_score, memory))
                     })
                     .collect();
 
-                // If graph retrieval returned 0 results, fall back to semantic search
-                if graph_results.is_empty() {
-                    tracing::info!(
-                        "Graph retrieval returned 0 results, falling back to semantic search"
-                    );
+                // Step 6: Sort by final hybrid score (descending)
+                scored_memories
+                    .sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
 
-                    // Generate query embedding
-                    let query_embedding = memory_guard
-                        .get_embedder()
-                        .encode(query_text)
-                        .map_err(AppError::Internal)?;
-
-                    // Get all memories
-                    let all_memories = memory_guard
-                        .get_all_memories()
-                        .map_err(AppError::Internal)?;
-
-                    // Score each memory by semantic similarity
-                    let mut scored_memories: Vec<(f32, Memory)> = all_memories
-                        .into_iter()
-                        .filter_map(|shared_mem| {
-                            let memory = (*shared_mem).clone();
-
-                            // Get or generate embedding
-                            let mem_embedding = if let Some(emb) = &memory.experience.embeddings {
-                                emb.clone()
-                            } else {
-                                return None;
-                            };
-
-                            // Compute cosine similarity
-                            let similarity = cosine_similarity(&query_embedding, &mem_embedding);
-                            Some((similarity, memory))
-                        })
-                        .collect();
-
-                    // Sort by similarity (descending)
-                    scored_memories
-                        .sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-
-                    // Take top-k and set scores
-                    scored_memories
-                        .into_iter()
-                        .take(query.max_results)
-                        .map(|(score, mut mem)| {
-                            mem.score = Some(score); // REAL semantic score!
-                            mem
-                        })
-                        .collect()
-                } else {
-                    graph_results
-                }
+                // Step 7: Take top-k and set scores
+                scored_memories
+                    .into_iter()
+                    .take(query.max_results)
+                    .map(|(score, mut mem)| {
+                        mem.score = Some(score);
+                        mem
+                    })
+                    .collect()
             } else {
                 // Fallback to traditional retrieval
                 let shared_memories = memory_guard.retrieve(&query).map_err(AppError::Internal)?;
@@ -2154,6 +2183,28 @@ async fn add_entity(
         other => graph_memory::EntityLabel::Other(other.to_string()),
     };
 
+    // Detect if proper noun (simple heuristic: first char is uppercase)
+    let is_proper_noun = req.name.chars().next().map(|c| c.is_uppercase()).unwrap_or(false);
+
+    // Calculate base salience based on entity type and proper noun status
+    let type_salience = match &entity_label {
+        graph_memory::EntityLabel::Person => 0.8,
+        graph_memory::EntityLabel::Organization => 0.7,
+        graph_memory::EntityLabel::Location => 0.6,
+        graph_memory::EntityLabel::Technology => 0.6,
+        graph_memory::EntityLabel::Product => 0.7,
+        graph_memory::EntityLabel::Event => 0.6,
+        graph_memory::EntityLabel::Skill => 0.5,
+        graph_memory::EntityLabel::Concept => 0.4,
+        graph_memory::EntityLabel::Date => 0.3,
+        graph_memory::EntityLabel::Other(_) => 0.3,
+    };
+    let salience = if is_proper_noun {
+        (type_salience * 1.2_f32).min(1.0_f32)
+    } else {
+        type_salience
+    };
+
     let entity = graph_memory::EntityNode {
         uuid: uuid::Uuid::new_v4(),
         name: req.name.clone(),
@@ -2164,6 +2215,8 @@ async fn add_entity(
         summary: String::new(),
         attributes: req.attributes.unwrap_or_default(),
         name_embedding: None,
+        salience,
+        is_proper_noun,
     };
 
     let entity_uuid = graph_guard

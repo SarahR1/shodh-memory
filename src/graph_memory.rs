@@ -41,6 +41,21 @@ pub struct EntityNode {
 
     /// Semantic embedding of the entity name (for similarity search)
     pub name_embedding: Option<Vec<f32>>,
+
+    /// Salience score (0.0 - 1.0): How important is this entity?
+    /// Higher salience = larger gravitational well in the memory universe
+    /// Factors: proper noun status, mention frequency, recency, user-defined importance
+    #[serde(default = "default_salience")]
+    pub salience: f32,
+
+    /// Whether this is a proper noun (names, places, products)
+    /// Proper nouns have higher base salience than common nouns
+    #[serde(default)]
+    pub is_proper_noun: bool,
+}
+
+fn default_salience() -> f32 {
+    0.5 // Default middle salience
 }
 
 /// Entity labels following Graphiti's categorization
@@ -286,6 +301,8 @@ impl GraphMemory {
     }
 
     /// Add or update an entity node
+    /// Salience is updated using the formula: salience = base_salience * (1 + 0.1 * ln(mention_count))
+    /// This means frequently mentioned entities grow in salience (gravitational wells get heavier)
     pub fn add_entity(&self, mut entity: EntityNode) -> Result<Uuid> {
         // Check if entity already exists by name
         let existing_uuid = {
@@ -300,6 +317,13 @@ impl GraphMemory {
                 entity.mention_count = existing.mention_count + 1;
                 entity.last_seen_at = Utc::now();
                 entity.created_at = existing.created_at; // Preserve original creation time
+                entity.is_proper_noun = existing.is_proper_noun || entity.is_proper_noun;
+
+                // Update salience with frequency boost
+                // Formula: salience = base_salience * (1 + 0.1 * ln(mention_count))
+                // This caps at about 1.3x boost at 20 mentions
+                let frequency_boost = 1.0 + 0.1 * (entity.mention_count as f32).ln();
+                entity.salience = (existing.salience * frequency_boost).min(1.0);
             }
         } else {
             // New entity
@@ -307,6 +331,7 @@ impl GraphMemory {
             entity.created_at = Utc::now();
             entity.last_seen_at = entity.created_at;
             entity.mention_count = 1;
+            // Salience stays at base_salience for new entities
         }
 
         // Store in database
@@ -614,7 +639,16 @@ pub struct GraphStats {
     pub episode_count: usize,
 }
 
-/// Simple entity extraction (rule-based NER)
+/// Extracted entity with salience information
+#[derive(Debug, Clone)]
+pub struct ExtractedEntity {
+    pub name: String,
+    pub label: EntityLabel,
+    pub is_proper_noun: bool,
+    pub base_salience: f32,
+}
+
+/// Simple entity extraction (rule-based NER) with salience detection
 pub struct EntityExtractor {
     /// Common person name indicators
     person_indicators: HashSet<String>,
@@ -624,6 +658,10 @@ pub struct EntityExtractor {
 
     /// Common technology keywords
     tech_keywords: HashSet<String>,
+
+    /// Common words that should NOT be extracted as entities
+    /// (stop words that start with capitals at sentence beginning)
+    stop_words: HashSet<String>,
 }
 
 impl EntityExtractor {
@@ -677,15 +715,76 @@ impl EntityExtractor {
         .map(String::from)
         .collect();
 
+        // Common words that are capitalized at sentence start but aren't entities
+        let stop_words: HashSet<String> = vec![
+            "the", "a", "an", "this", "that", "these", "those",
+            "i", "we", "you", "he", "she", "it", "they",
+            "is", "are", "was", "were", "been", "being",
+            "have", "has", "had", "do", "does", "did",
+            "will", "would", "could", "should", "may", "might",
+            "if", "when", "where", "what", "why", "how",
+            "user", "error", "task", "code", "pattern", "search",
+            "discovered", "completed", "performed", "mentioned",
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect();
+
         Self {
             person_indicators,
             org_indicators,
             tech_keywords,
+            stop_words,
         }
     }
 
-    /// Extract entities from text (simple capitalization + keyword-based)
-    pub fn extract(&self, text: &str) -> Vec<(String, EntityLabel)> {
+    /// Calculate base salience for an entity based on its type and detection confidence
+    fn calculate_base_salience(label: &EntityLabel, is_proper_noun: bool) -> f32 {
+        let type_salience = match label {
+            EntityLabel::Person => 0.8,        // People are highly salient
+            EntityLabel::Organization => 0.7,  // Organizations are important
+            EntityLabel::Location => 0.6,      // Locations matter for context
+            EntityLabel::Technology => 0.6,    // Tech keywords matter for dev context
+            EntityLabel::Product => 0.7,       // Products are specific entities
+            EntityLabel::Event => 0.6,         // Events are temporal anchors
+            EntityLabel::Skill => 0.5,         // Skills are somewhat important
+            EntityLabel::Concept => 0.4,       // Concepts are more generic
+            EntityLabel::Date => 0.3,          // Dates are structural, not salient
+            EntityLabel::Other(_) => 0.3,      // Unknown types get low salience
+        };
+
+        // Proper nouns get a 20% boost
+        if is_proper_noun {
+            (type_salience * 1.2_f32).min(1.0_f32)
+        } else {
+            type_salience
+        }
+    }
+
+    /// Check if a word is likely a proper noun (not just capitalized at sentence start)
+    fn is_likely_proper_noun(&self, word: &str, position: usize, prev_char: Option<char>) -> bool {
+        // If it's not at position 0 and is capitalized, it's likely a proper noun
+        if position > 0 {
+            return true;
+        }
+
+        // At position 0, check if previous character was punctuation (sentence start)
+        // If previous char was '.', '!', '?' then this might just be sentence capitalization
+        if let Some(c) = prev_char {
+            if c == '.' || c == '!' || c == '?' {
+                // It's at sentence start - could be either
+                // Check if it's a common word
+                let lower = word.to_lowercase();
+                return !self.stop_words.contains(&lower);
+            }
+        }
+
+        // Default to proper noun for capitalized words
+        true
+    }
+
+    /// Extract entities from text with salience information
+    pub fn extract_with_salience(&self, text: &str) -> Vec<ExtractedEntity> {
         let mut entities = Vec::new();
         let mut seen = HashSet::new();
 
@@ -695,16 +794,28 @@ impl EntityExtractor {
         for (i, word) in words.iter().enumerate() {
             let clean_word = word.trim_matches(|c: char| !c.is_alphanumeric());
 
-            if clean_word.is_empty() {
+            if clean_word.is_empty() || clean_word.len() < 2 {
                 continue;
             }
 
             let lower = clean_word.to_lowercase();
 
-            // Check for technology keywords
+            // Skip common stop words
+            if self.stop_words.contains(&lower) {
+                continue;
+            }
+
+            // Check for technology keywords (always proper nouns in tech context)
             if self.tech_keywords.contains(&lower) && !seen.contains(&lower) {
-                entities.push((clean_word.to_string(), EntityLabel::Technology));
+                let entity = ExtractedEntity {
+                    name: clean_word.to_string(),
+                    label: EntityLabel::Technology,
+                    is_proper_noun: true, // Tech keywords are always "proper" in context
+                    base_salience: Self::calculate_base_salience(&EntityLabel::Technology, true),
+                };
+                entities.push(entity);
                 seen.insert(lower.clone());
+                continue;
             }
 
             // Check for capitalized words (potential entities)
@@ -716,6 +827,15 @@ impl EntityExtractor {
             {
                 let mut entity_name = clean_word.to_string();
                 let mut entity_label = EntityLabel::Other("Unknown".to_string());
+
+                // Determine previous character for proper noun detection
+                let prev_char = if i > 0 {
+                    words[i - 1].chars().last()
+                } else {
+                    None
+                };
+
+                let is_proper = self.is_likely_proper_noun(clean_word, i, prev_char);
 
                 // Check for person indicators
                 if i > 0
@@ -736,8 +856,11 @@ impl EntityExtractor {
                         .unwrap_or(false)
                 {
                     let next_word = words[j].trim_matches(|c: char| !c.is_alphanumeric());
-                    entity_name.push(' ');
-                    entity_name.push_str(next_word);
+                    // Skip stop words in multi-word sequences
+                    if !self.stop_words.contains(&next_word.to_lowercase()) {
+                        entity_name.push(' ');
+                        entity_name.push_str(next_word);
+                    }
                     j += 1;
                 }
 
@@ -758,13 +881,28 @@ impl EntityExtractor {
 
                 let entity_key = entity_name.to_lowercase();
                 if !seen.contains(&entity_key) {
-                    entities.push((entity_name, entity_label));
+                    let base_salience = Self::calculate_base_salience(&entity_label, is_proper);
+                    let entity = ExtractedEntity {
+                        name: entity_name,
+                        label: entity_label,
+                        is_proper_noun: is_proper,
+                        base_salience,
+                    };
+                    entities.push(entity);
                     seen.insert(entity_key);
                 }
             }
         }
 
         entities
+    }
+
+    /// Legacy method for backward compatibility - returns (name, label) tuples
+    pub fn extract(&self, text: &str) -> Vec<(String, EntityLabel)> {
+        self.extract_with_salience(text)
+            .into_iter()
+            .map(|e| (e.name, e.label))
+            .collect()
     }
 }
 

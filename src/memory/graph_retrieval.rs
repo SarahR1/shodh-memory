@@ -191,10 +191,12 @@ pub fn spreading_activation_retrieve(
             // Calculate linguistic match score
             let linguistic_score = calculate_linguistic_match(&memory, &analysis);
 
-            // Hybrid scoring (Xiong et al. 2017)
-            // Graph: 60%, Semantic: 25%, Linguistic: 15%
+            // Hybrid scoring (adjusted for semantic-first retrieval)
+            // Semantic: 50%, Graph: 35%, Linguistic: 15%
+            // Semantic similarity is primary for content matching
+            // Graph activation helps with context-related memories
             let final_score =
-                0.60 * graph_activation + 0.25 * semantic_score + 0.15 * linguistic_score;
+                0.35 * graph_activation + 0.50 * semantic_score + 0.15 * linguistic_score;
 
             scored_memories.push(ActivatedMemory {
                 memory,

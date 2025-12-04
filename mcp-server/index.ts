@@ -79,9 +79,9 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             },
             type: {
               type: "string",
-              enum: ["observation", "decision", "learning", "action", "error", "user_preference", "project_context"],
+              enum: ["Observation", "Decision", "Learning", "Error", "Discovery", "Pattern", "Context", "Task", "CodeEdit", "FileAccess", "Search", "Command", "Conversation"],
               description: "Type of memory",
-              default: "observation",
+              default: "Observation",
             },
             tags: {
               type: "array",
@@ -158,7 +158,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     switch (name) {
       case "remember": {
-        const { content, type = "observation", tags = [] } = args as {
+        const { content, type = "Observation", tags = [] } = args as {
           content: string;
           type?: string;
           tags?: string[];
@@ -260,7 +260,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case "forget": {
         const { memory_id } = args as { memory_id: string };
 
-        await apiCall(`/api/memory/${memory_id}`, "DELETE");
+        await apiCall(`/api/memory/${memory_id}?user_id=${USER_ID}`, "DELETE");
 
         return {
           content: [
@@ -273,7 +273,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "memory_stats": {
-        const result = await apiCall(`/api/stats/${USER_ID}`, "GET");
+        const result = await apiCall(`/api/users/${USER_ID}/stats`, "GET");
 
         return {
           content: [
