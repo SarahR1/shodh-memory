@@ -2390,9 +2390,7 @@ async fn get_memory_universe(
 ) -> Result<Json<graph_memory::MemoryUniverse>, AppError> {
     validation::validate_user_id(&user_id).map_validation_err("user_id")?;
 
-    let graph = state
-        .get_user_graph(&user_id)
-        .map_err(AppError::Internal)?;
+    let graph = state.get_user_graph(&user_id).map_err(AppError::Internal)?;
 
     let graph_guard = graph.read();
     let universe = graph_guard

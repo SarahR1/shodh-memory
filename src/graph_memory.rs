@@ -776,17 +776,17 @@ impl GraphMemory {
 /// Helper function to get color for entity type
 fn entity_type_color(label: Option<&EntityLabel>) -> String {
     match label {
-        Some(EntityLabel::Person) => "#FF6B6B".to_string(),        // Coral red
-        Some(EntityLabel::Organization) => "#4ECDC4".to_string(),  // Teal
-        Some(EntityLabel::Location) => "#45B7D1".to_string(),      // Sky blue
-        Some(EntityLabel::Technology) => "#96CEB4".to_string(),    // Sage green
-        Some(EntityLabel::Product) => "#FFEAA7".to_string(),       // Soft yellow
-        Some(EntityLabel::Event) => "#DDA0DD".to_string(),         // Plum
-        Some(EntityLabel::Skill) => "#98D8C8".to_string(),         // Mint
-        Some(EntityLabel::Concept) => "#F7DC6F".to_string(),       // Gold
-        Some(EntityLabel::Date) => "#BB8FCE".to_string(),          // Light purple
-        Some(EntityLabel::Other(_)) => "#AEB6BF".to_string(),      // Gray
-        None => "#AEB6BF".to_string(),                             // Gray default
+        Some(EntityLabel::Person) => "#FF6B6B".to_string(), // Coral red
+        Some(EntityLabel::Organization) => "#4ECDC4".to_string(), // Teal
+        Some(EntityLabel::Location) => "#45B7D1".to_string(), // Sky blue
+        Some(EntityLabel::Technology) => "#96CEB4".to_string(), // Sage green
+        Some(EntityLabel::Product) => "#FFEAA7".to_string(), // Soft yellow
+        Some(EntityLabel::Event) => "#DDA0DD".to_string(),  // Plum
+        Some(EntityLabel::Skill) => "#98D8C8".to_string(),  // Mint
+        Some(EntityLabel::Concept) => "#F7DC6F".to_string(), // Gold
+        Some(EntityLabel::Date) => "#BB8FCE".to_string(),   // Light purple
+        Some(EntityLabel::Other(_)) => "#AEB6BF".to_string(), // Gray
+        None => "#AEB6BF".to_string(),                      // Gray default
     }
 }
 
