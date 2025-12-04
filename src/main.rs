@@ -2379,6 +2379,29 @@ async fn get_all_entities(
     })))
 }
 
+// ====== Memory Universe Visualization API ======
+
+/// Get the Memory Universe visualization for a user's knowledge graph.
+/// Returns entities as "stars" with 3D positions based on their relationships,
+/// sized by salience (gravitational mass), and colored by entity type.
+async fn get_memory_universe(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+) -> Result<Json<graph_memory::MemoryUniverse>, AppError> {
+    validation::validate_user_id(&user_id).map_validation_err("user_id")?;
+
+    let graph = state
+        .get_user_graph(&user_id)
+        .map_err(AppError::Internal)?;
+
+    let graph_guard = graph.read();
+    let universe = graph_guard
+        .get_universe()
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+
+    Ok(Json(universe))
+}
+
 // ====== Memory Visualization API Endpoints ======
 
 /// Get visualization statistics for a user's memory graph
@@ -2593,6 +2616,8 @@ async fn main() -> Result<()> {
         .route("/api/graph/traverse", post(traverse_graph))
         // Graph Memory - Episodes
         .route("/api/graph/episode/get", post(get_episode))
+        // Memory Universe Visualization (3D graph with salience-based sizing)
+        .route("/api/graph/{user_id}/universe", get(get_memory_universe))
         // Memory Visualization
         .route(
             "/api/visualization/{user_id}/stats",

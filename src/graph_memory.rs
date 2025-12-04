@@ -622,6 +622,223 @@ impl GraphMemory {
 
         Ok(entities)
     }
+
+    /// Get all relationships in the graph
+    pub fn get_all_relationships(&self) -> Result<Vec<RelationshipEdge>> {
+        let mut relationships = Vec::new();
+
+        let iter = self.relationships_db.iterator(rocksdb::IteratorMode::Start);
+        for (_, value) in iter.flatten() {
+            if let Ok(edge) = bincode::deserialize::<RelationshipEdge>(&value) {
+                // Only include non-invalidated relationships
+                if edge.invalidated_at.is_none() {
+                    relationships.push(edge);
+                }
+            }
+        }
+
+        // Sort by strength (strongest first)
+        relationships.sort_by(|a, b| {
+            b.strength
+                .partial_cmp(&a.strength)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        Ok(relationships)
+    }
+
+    /// Get the Memory Universe visualization data
+    /// Returns entities as "stars" with positions based on their relationships,
+    /// sized by salience, and colored by entity type.
+    pub fn get_universe(&self) -> Result<MemoryUniverse> {
+        let entities = self.get_all_entities()?;
+        let relationships = self.get_all_relationships()?;
+
+        // Create entity UUID to index mapping for position calculation
+        let entity_indices: HashMap<Uuid, usize> = entities
+            .iter()
+            .enumerate()
+            .map(|(i, e)| (e.uuid, i))
+            .collect();
+
+        // Calculate 3D positions using a force-directed layout approximation
+        // High-salience entities are positioned more centrally
+        let mut stars: Vec<UniverseStar> = entities
+            .iter()
+            .enumerate()
+            .map(|(i, entity)| {
+                // Use a spiral galaxy layout with salience affecting radius
+                // Higher salience = closer to center
+                let angle = (i as f32) * 2.4; // Golden angle for even distribution
+                let base_radius = 1.0 - entity.salience; // High salience = small radius
+                let radius = base_radius * 100.0 + 10.0; // 10-110 range
+
+                let x = radius * angle.cos();
+                let y = radius * angle.sin();
+                let z = ((i as f32) * 0.1).sin() * 20.0; // Slight z variation
+
+                UniverseStar {
+                    id: entity.uuid.to_string(),
+                    name: entity.name.clone(),
+                    entity_type: entity.labels.first().map(|l| l.as_str().to_string()),
+                    salience: entity.salience,
+                    mention_count: entity.mention_count,
+                    is_proper_noun: entity.is_proper_noun,
+                    position: Position3D { x, y, z },
+                    color: entity_type_color(entity.labels.first()),
+                    size: 5.0 + entity.salience * 20.0, // Size 5-25 based on salience
+                }
+            })
+            .collect();
+
+        // Create gravitational connections from relationships
+        let connections: Vec<GravitationalConnection> = relationships
+            .iter()
+            .filter_map(|rel| {
+                let from_idx = entity_indices.get(&rel.from_entity)?;
+                let to_idx = entity_indices.get(&rel.to_entity)?;
+
+                Some(GravitationalConnection {
+                    id: rel.uuid.to_string(),
+                    from_id: rel.from_entity.to_string(),
+                    to_id: rel.to_entity.to_string(),
+                    relation_type: rel.relation_type.as_str().to_string(),
+                    strength: rel.strength,
+                    from_position: stars[*from_idx].position.clone(),
+                    to_position: stars[*to_idx].position.clone(),
+                })
+            })
+            .collect();
+
+        // Update star positions based on connections (simple force adjustment)
+        // Stars with more connections are pulled toward each other
+        for conn in &connections {
+            if let (Some(from_idx), Some(to_idx)) = (
+                entity_indices.get(&Uuid::parse_str(&conn.from_id).unwrap_or_default()),
+                entity_indices.get(&Uuid::parse_str(&conn.to_id).unwrap_or_default()),
+            ) {
+                // Apply small gravitational pull based on connection strength
+                let pull_factor = conn.strength * 0.05;
+
+                let from_pos = &stars[*from_idx].position;
+                let to_pos = &stars[*to_idx].position;
+
+                let dx = (to_pos.x - from_pos.x) * pull_factor;
+                let dy = (to_pos.y - from_pos.y) * pull_factor;
+                let dz = (to_pos.z - from_pos.z) * pull_factor;
+
+                stars[*from_idx].position.x += dx;
+                stars[*from_idx].position.y += dy;
+                stars[*from_idx].position.z += dz;
+
+                stars[*to_idx].position.x -= dx;
+                stars[*to_idx].position.y -= dy;
+                stars[*to_idx].position.z -= dz;
+            }
+        }
+
+        // Calculate universe bounds
+        let (min_x, max_x, min_y, max_y, min_z, max_z) = stars.iter().fold(
+            (f32::MAX, f32::MIN, f32::MAX, f32::MIN, f32::MAX, f32::MIN),
+            |(min_x, max_x, min_y, max_y, min_z, max_z), star| {
+                (
+                    min_x.min(star.position.x),
+                    max_x.max(star.position.x),
+                    min_y.min(star.position.y),
+                    max_y.max(star.position.y),
+                    min_z.min(star.position.z),
+                    max_z.max(star.position.z),
+                )
+            },
+        );
+
+        Ok(MemoryUniverse {
+            stars,
+            connections,
+            total_entities: entities.len(),
+            total_connections: relationships.len(),
+            bounds: UniverseBounds {
+                min: Position3D {
+                    x: min_x,
+                    y: min_y,
+                    z: min_z,
+                },
+                max: Position3D {
+                    x: max_x,
+                    y: max_y,
+                    z: max_z,
+                },
+            },
+        })
+    }
+}
+
+/// Helper function to get color for entity type
+fn entity_type_color(label: Option<&EntityLabel>) -> String {
+    match label {
+        Some(EntityLabel::Person) => "#FF6B6B".to_string(),        // Coral red
+        Some(EntityLabel::Organization) => "#4ECDC4".to_string(),  // Teal
+        Some(EntityLabel::Location) => "#45B7D1".to_string(),      // Sky blue
+        Some(EntityLabel::Technology) => "#96CEB4".to_string(),    // Sage green
+        Some(EntityLabel::Product) => "#FFEAA7".to_string(),       // Soft yellow
+        Some(EntityLabel::Event) => "#DDA0DD".to_string(),         // Plum
+        Some(EntityLabel::Skill) => "#98D8C8".to_string(),         // Mint
+        Some(EntityLabel::Concept) => "#F7DC6F".to_string(),       // Gold
+        Some(EntityLabel::Date) => "#BB8FCE".to_string(),          // Light purple
+        Some(EntityLabel::Other(_)) => "#AEB6BF".to_string(),      // Gray
+        None => "#AEB6BF".to_string(),                             // Gray default
+    }
+}
+
+/// 3D position in the memory universe
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Position3D {
+    pub x: f32,
+    pub y: f32,
+    pub z: f32,
+}
+
+/// A star in the memory universe (represents an entity)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UniverseStar {
+    pub id: String,
+    pub name: String,
+    pub entity_type: Option<String>,
+    pub salience: f32,
+    pub mention_count: usize,
+    pub is_proper_noun: bool,
+    pub position: Position3D,
+    pub color: String,
+    pub size: f32,
+}
+
+/// A gravitational connection between stars (represents a relationship)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GravitationalConnection {
+    pub id: String,
+    pub from_id: String,
+    pub to_id: String,
+    pub relation_type: String,
+    pub strength: f32,
+    pub from_position: Position3D,
+    pub to_position: Position3D,
+}
+
+/// Bounds of the memory universe
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UniverseBounds {
+    pub min: Position3D,
+    pub max: Position3D,
+}
+
+/// The complete memory universe visualization
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryUniverse {
+    pub stars: Vec<UniverseStar>,
+    pub connections: Vec<GravitationalConnection>,
+    pub total_entities: usize,
+    pub total_connections: usize,
+    pub bounds: UniverseBounds,
 }
 
 /// Result of graph traversal
