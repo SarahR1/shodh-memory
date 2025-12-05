@@ -290,3 +290,402 @@ impl Default for CompressionStats {
         }
     }
 }
+
+// ============================================================================
+// SEMANTIC CONSOLIDATION - Extract durable facts from episodic memories
+// ============================================================================
+
+/// A semantic fact extracted from episodic memories
+///
+/// As memories age, specific episodes ("yesterday I debugged the auth module")
+/// consolidate into semantic knowledge ("the auth module uses JWT tokens").
+/// This mimics how human memory transitions from episodic to semantic.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SemanticFact {
+    /// Unique identifier
+    pub id: String,
+    /// The factual statement
+    pub fact: String,
+    /// Confidence in this fact (0.0 - 1.0)
+    pub confidence: f32,
+    /// How many episodic memories support this fact
+    pub support_count: usize,
+    /// Source memory IDs that contributed to this fact
+    pub source_memories: Vec<MemoryId>,
+    /// Keywords/entities this fact relates to
+    pub related_entities: Vec<String>,
+    /// When this fact was first extracted
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// When this fact was last reinforced
+    pub last_reinforced: chrono::DateTime<chrono::Utc>,
+    /// Category of fact (preference, capability, relationship, procedure)
+    pub fact_type: FactType,
+}
+
+/// Types of semantic facts
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum FactType {
+    /// User preference: "prefers concise code"
+    Preference,
+    /// System capability: "can handle 10k requests/sec"
+    Capability,
+    /// Relationship: "auth module depends on JWT library"
+    Relationship,
+    /// Procedure: "to deploy, run cargo build --release"
+    Procedure,
+    /// Definition: "MemoryId is a UUID wrapper"
+    Definition,
+    /// Pattern: "errors often occur after deployment"
+    Pattern,
+}
+
+impl Default for FactType {
+    fn default() -> Self {
+        Self::Pattern
+    }
+}
+
+/// Result of consolidation operation
+#[derive(Debug, Clone, Default)]
+pub struct ConsolidationResult {
+    /// Number of memories processed
+    pub memories_processed: usize,
+    /// Number of new facts extracted
+    pub facts_extracted: usize,
+    /// Number of existing facts reinforced
+    pub facts_reinforced: usize,
+    /// IDs of newly created facts
+    pub new_fact_ids: Vec<String>,
+}
+
+/// Semantic consolidation engine
+///
+/// Extracts durable semantic facts from episodic memories based on:
+/// - Repetition: Same information appearing across multiple episodes
+/// - Importance: High-importance memories get extracted faster
+/// - Age: Older memories are consolidated more aggressively
+pub struct SemanticConsolidator {
+    keyword_extractor: KeywordExtractor,
+    /// Minimum times a pattern must appear to become a fact
+    min_support: usize,
+    /// Minimum age in days before consolidation
+    min_age_days: i64,
+}
+
+impl Default for SemanticConsolidator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl SemanticConsolidator {
+    pub fn new() -> Self {
+        Self {
+            keyword_extractor: KeywordExtractor::new(),
+            min_support: 2,
+            min_age_days: 7,
+        }
+    }
+
+    /// Create with custom thresholds
+    pub fn with_thresholds(min_support: usize, min_age_days: i64) -> Self {
+        Self {
+            keyword_extractor: KeywordExtractor::new(),
+            min_support,
+            min_age_days,
+        }
+    }
+
+    /// Extract semantic facts from a set of memories
+    ///
+    /// This identifies recurring patterns and converts them to durable facts.
+    /// Returns new facts and IDs of facts that were reinforced.
+    pub fn consolidate(&self, memories: &[Memory]) -> ConsolidationResult {
+        let mut result = ConsolidationResult {
+            memories_processed: memories.len(),
+            ..Default::default()
+        };
+
+        if memories.is_empty() {
+            return result;
+        }
+
+        // Filter to memories old enough for consolidation
+        let now = chrono::Utc::now();
+        let eligible: Vec<&Memory> = memories
+            .iter()
+            .filter(|m| (now - m.created_at).num_days() >= self.min_age_days)
+            .collect();
+
+        if eligible.is_empty() {
+            return result;
+        }
+
+        // Extract candidate facts from each memory
+        let mut candidates: HashMap<String, Vec<(&Memory, f32)>> = HashMap::new();
+
+        for memory in &eligible {
+            let extracted = self.extract_fact_candidates(memory);
+            for (pattern, confidence) in extracted {
+                candidates
+                    .entry(pattern)
+                    .or_default()
+                    .push((memory, confidence));
+            }
+        }
+
+        // Convert patterns with sufficient support into facts
+        for (pattern, sources) in candidates {
+            if sources.len() >= self.min_support {
+                let avg_confidence: f32 =
+                    sources.iter().map(|(_, c)| c).sum::<f32>() / sources.len() as f32;
+
+                let source_ids: Vec<MemoryId> = sources.iter().map(|(m, _)| m.id.clone()).collect();
+
+                // Extract entities from the pattern
+                let entities = self.keyword_extractor.extract(&pattern);
+
+                let fact_type = self.classify_fact(&pattern);
+
+                let fact = SemanticFact {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    fact: pattern,
+                    confidence: avg_confidence.min(1.0),
+                    support_count: sources.len(),
+                    source_memories: source_ids,
+                    related_entities: entities,
+                    created_at: now,
+                    last_reinforced: now,
+                    fact_type,
+                };
+
+                result.new_fact_ids.push(fact.id.clone());
+                result.facts_extracted += 1;
+            }
+        }
+
+        result
+    }
+
+    /// Extract fact candidates from a single memory
+    fn extract_fact_candidates(&self, memory: &Memory) -> Vec<(String, f32)> {
+        let mut candidates = Vec::new();
+        let content = &memory.experience.content;
+
+        // Extract based on experience type
+        match memory.experience.experience_type {
+            ExperienceType::Decision => {
+                // Decision memories often contain procedures
+                if let Some(fact) = self.extract_procedure(content) {
+                    candidates.push((fact, memory.importance()));
+                }
+            }
+            ExperienceType::Learning | ExperienceType::Discovery => {
+                // Learning/Discovery often contain definitions or capabilities
+                if let Some(fact) = self.extract_definition(content) {
+                    candidates.push((fact, memory.importance() * 1.2));
+                }
+            }
+            ExperienceType::Error => {
+                // Errors often reveal patterns
+                if let Some(fact) = self.extract_pattern(content) {
+                    candidates.push((fact, memory.importance() * 1.1));
+                }
+            }
+            ExperienceType::Conversation => {
+                // Conversations may contain preferences
+                if let Some(fact) = self.extract_preference(content) {
+                    candidates.push((fact, memory.importance()));
+                }
+            }
+            _ => {
+                // Generic extraction for other types
+                let keywords = self.keyword_extractor.extract(content);
+                if keywords.len() >= 3 {
+                    let fact = format!("involves: {}", keywords.join(", "));
+                    candidates.push((fact, memory.importance() * 0.5));
+                }
+            }
+        }
+
+        // Also extract entity relationships
+        if memory.experience.entities.len() >= 2 {
+            let relationship = format!(
+                "{} relates to {}",
+                memory.experience.entities[0],
+                memory.experience.entities[1..].join(", ")
+            );
+            candidates.push((relationship, memory.importance() * 0.8));
+        }
+
+        candidates
+    }
+
+    /// Extract a procedure from content (looks for action words)
+    fn extract_procedure(&self, content: &str) -> Option<String> {
+        let lower = content.to_lowercase();
+        let action_markers = [
+            "to ", "run ", "execute ", "use ", "call ", "invoke ", "create ", "build ", "deploy ",
+        ];
+
+        for marker in action_markers {
+            if let Some(pos) = lower.find(marker) {
+                // Extract the sentence containing this marker
+                let start = content[..pos].rfind(|c| c == '.' || c == '!' || c == '?');
+                let start = start.map(|i| i + 1).unwrap_or(0);
+
+                let end = content[pos..].find(|c| c == '.' || c == '!' || c == '?');
+                let end = end.map(|i| pos + i).unwrap_or(content.len());
+
+                let sentence = content[start..end].trim();
+                if sentence.len() > 10 && sentence.len() < 200 {
+                    return Some(sentence.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    /// Extract a definition from content
+    fn extract_definition(&self, content: &str) -> Option<String> {
+        let lower = content.to_lowercase();
+        let def_markers = [" is ", " are ", " means ", " refers to ", " represents "];
+
+        for marker in def_markers {
+            if let Some(pos) = lower.find(marker) {
+                // Extract subject and definition
+                let subject_start =
+                    content[..pos].rfind(|c: char| !c.is_alphanumeric() && c != '_');
+                let subject_start = subject_start.map(|i| i + 1).unwrap_or(0);
+                let subject = &content[subject_start..pos];
+
+                if subject.len() >= 2 {
+                    let def_end = content[pos + marker.len()..]
+                        .find(|c| c == '.' || c == '!' || c == '?' || c == ',');
+                    let def_end = def_end
+                        .map(|i| pos + marker.len() + i)
+                        .unwrap_or(content.len().min(pos + marker.len() + 100));
+
+                    let definition = &content[pos + marker.len()..def_end];
+                    if definition.len() > 5 {
+                        return Some(format!("{}{}{}", subject, marker, definition.trim()));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// Extract a pattern from error content
+    fn extract_pattern(&self, content: &str) -> Option<String> {
+        let lower = content.to_lowercase();
+        let pattern_markers = [
+            "error",
+            "failed",
+            "crash",
+            "bug",
+            "issue",
+            "problem",
+            "exception",
+        ];
+
+        for marker in pattern_markers {
+            if lower.contains(marker) {
+                // Extract the key phrase around the error
+                let keywords = self.keyword_extractor.extract(content);
+                if keywords.len() >= 2 {
+                    return Some(format!(
+                        "{} can cause issues with {}",
+                        keywords[0],
+                        keywords[1..].join(", ")
+                    ));
+                }
+            }
+        }
+        None
+    }
+
+    /// Extract a preference from conversation content
+    fn extract_preference(&self, content: &str) -> Option<String> {
+        let lower = content.to_lowercase();
+        let pref_markers = [
+            "prefer", "like", "want", "better", "should", "always", "never",
+        ];
+
+        for marker in pref_markers {
+            if lower.contains(marker) {
+                // Extract the preference statement
+                let keywords = self.keyword_extractor.extract(content);
+                if !keywords.is_empty() {
+                    return Some(format!("preference: {}", keywords.join(", ")));
+                }
+            }
+        }
+        None
+    }
+
+    /// Classify what type of fact this is
+    fn classify_fact(&self, pattern: &str) -> FactType {
+        let lower = pattern.to_lowercase();
+
+        if lower.starts_with("preference:") || lower.contains("prefer") || lower.contains("like") {
+            FactType::Preference
+        } else if lower.contains("can ") || lower.contains("able to") || lower.contains("supports")
+        {
+            FactType::Capability
+        } else if lower.contains("relates to")
+            || lower.contains("depends on")
+            || lower.contains("connects")
+        {
+            FactType::Relationship
+        } else if lower.contains("to ")
+            || lower.contains("run ")
+            || lower.contains("execute")
+            || lower.contains("deploy")
+        {
+            FactType::Procedure
+        } else if lower.contains(" is ") || lower.contains(" are ") || lower.contains("means") {
+            FactType::Definition
+        } else {
+            FactType::Pattern
+        }
+    }
+
+    /// Reinforce an existing fact with new evidence
+    ///
+    /// Called when a memory matches an existing fact, strengthening confidence.
+    pub fn reinforce_fact(&self, fact: &mut SemanticFact, memory: &Memory) {
+        fact.support_count += 1;
+        fact.last_reinforced = chrono::Utc::now();
+
+        // Increase confidence with diminishing returns
+        let boost = 0.1 * (1.0 - fact.confidence);
+        fact.confidence = (fact.confidence + boost).min(1.0);
+
+        // Add source if not already present
+        if !fact.source_memories.contains(&memory.id) {
+            fact.source_memories.push(memory.id.clone());
+        }
+
+        // Add any new entities
+        for entity in &memory.experience.entities {
+            if !fact.related_entities.contains(entity) {
+                fact.related_entities.push(entity.clone());
+            }
+        }
+    }
+
+    /// Check if a fact should decay (no reinforcement for too long)
+    ///
+    /// Returns true if the fact should be removed.
+    pub fn should_decay_fact(&self, fact: &SemanticFact, decay_days: i64) -> bool {
+        let now = chrono::Utc::now();
+        let days_since_reinforcement = (now - fact.last_reinforced).num_days();
+
+        // Facts with high confidence and support decay slower
+        let decay_threshold =
+            decay_days + (fact.confidence * 30.0) as i64 + fact.support_count as i64 * 7;
+
+        days_since_reinforcement > decay_threshold
+    }
+}

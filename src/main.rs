@@ -1081,7 +1081,7 @@ async fn record_experience(
         let experience = req.experience.clone();
 
         tokio::task::spawn_blocking(move || {
-            let mut memory_guard = memory.write();
+            let memory_guard = memory.read();
             memory_guard.record(experience)
         })
         .await
@@ -1176,7 +1176,7 @@ async fn remember(
     let memory_id = {
         let memory = memory.clone();
         tokio::task::spawn_blocking(move || {
-            let mut memory_guard = memory.write();
+            let memory_guard = memory.read();
             memory_guard.record(experience)
         })
         .await
@@ -1271,7 +1271,7 @@ async fn batch_remember(
     let (ids, error_count) = {
         let memory = memory.clone();
         tokio::task::spawn_blocking(move || {
-            let mut memory_guard = memory.write();
+            let memory_guard = memory.read();
             let mut ids = Vec::with_capacity(items.len());
             let mut errors = 0usize;
 
@@ -1684,7 +1684,7 @@ async fn update_memory(
         .get_user_memory(&req.user_id)
         .map_err(AppError::Internal)?;
 
-    let mut memory_guard = memory.write();
+    let memory_guard = memory.read();
 
     let mem_id =
         uuid::Uuid::parse_str(&memory_id).map_err(|e| AppError::InvalidMemoryId(e.to_string()))?;
@@ -1753,7 +1753,7 @@ async fn delete_memory(
 
     let memory = state.get_user_memory(user_id).map_err(AppError::Internal)?;
 
-    let mut memory_guard = memory.write();
+    let memory_guard = memory.read();
 
     // Delete by ID - escape UUID to treat as literal string, not regex
     // UUIDs contain hyphens which are regex metacharacters, so we must escape them
@@ -2204,7 +2204,7 @@ async fn forget_by_age(
         .get_user_memory(&req.user_id)
         .map_err(AppError::Internal)?;
 
-    let mut memory_guard = memory_sys.write();
+    let memory_guard = memory_sys.read();
     let count = memory_guard
         .forget(memory::ForgetCriteria::OlderThan(req.days_old))
         .map_err(AppError::Internal)?;
@@ -2247,7 +2247,7 @@ async fn forget_by_importance(
         .get_user_memory(&req.user_id)
         .map_err(AppError::Internal)?;
 
-    let mut memory_guard = memory_sys.write();
+    let memory_guard = memory_sys.read();
     let count = memory_guard
         .forget(memory::ForgetCriteria::LowImportance(req.threshold))
         .map_err(AppError::Internal)?;
@@ -2283,7 +2283,7 @@ async fn forget_by_pattern(
         .get_user_memory(&req.user_id)
         .map_err(AppError::Internal)?;
 
-    let mut memory_guard = memory_sys.write();
+    let memory_guard = memory_sys.read();
     let count = memory_guard
         .forget(memory::ForgetCriteria::Pattern(req.pattern.clone()))
         .map_err(AppError::Internal)?;

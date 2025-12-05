@@ -364,7 +364,7 @@ impl MiniLMEmbedder {
     ///
     /// Uses hash-based embeddings that are fast but less semantic.
     /// Suitable for edge devices without enough RAM for ONNX.
-    fn new_simplified(config: EmbeddingConfig) -> Result<Self> {
+    pub fn new_simplified(config: EmbeddingConfig) -> Result<Self> {
         tracing::warn!(
             "Using SIMPLIFIED embeddings (hash-based). Semantic search will be limited."
         );
@@ -558,6 +558,119 @@ impl MiniLMEmbedder {
 
         Ok(pooled)
     }
+
+    /// Generate embeddings for multiple texts in a single ONNX batch
+    ///
+    /// This is significantly faster than encoding texts one at a time because:
+    /// 1. Single ONNX session.run() call amortizes overhead
+    /// 2. GPU/CPU can parallelize across batch dimension
+    /// 3. Memory allocation is done once for the batch
+    ///
+    /// # Arguments
+    /// * `texts` - Slice of text strings to encode
+    ///
+    /// # Returns
+    /// * Vector of embeddings, one per input text
+    fn generate_embeddings_batch_onnx(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Lazy load model on first use
+        let model = self.ensure_model_loaded()?;
+        let mut session = model.session.lock();
+
+        let batch_size = texts.len();
+        let max_length = self.config.max_length;
+
+        // Tokenize all texts
+        let encodings: Vec<_> = texts
+            .iter()
+            .map(|text| {
+                model
+                    .tokenizer
+                    .encode(*text, true)
+                    .map_err(|e| anyhow::anyhow!("Tokenization failed: {e}"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        // Prepare batched tensors
+        let total_elements = batch_size * max_length;
+        let mut input_ids = vec![0i64; total_elements];
+        let mut attention_masks = vec![0i64; total_elements];
+        let token_type_ids = vec![0i64; total_elements];
+
+        for (batch_idx, encoding) in encodings.iter().enumerate() {
+            let tokens = encoding.get_ids();
+            let attention_mask = encoding.get_attention_mask();
+            let offset = batch_idx * max_length;
+
+            for (i, &token) in tokens.iter().take(max_length).enumerate() {
+                input_ids[offset + i] = token as i64;
+            }
+            for (i, &mask) in attention_mask.iter().take(max_length).enumerate() {
+                attention_masks[offset + i] = mask as i64;
+            }
+        }
+
+        // Create batched input tensors
+        let input_ids_value = Value::from_array((vec![batch_size, max_length], input_ids))?;
+        let attention_mask_value =
+            Value::from_array((vec![batch_size, max_length], attention_masks.clone()))?;
+        let token_type_ids_value =
+            Value::from_array((vec![batch_size, max_length], token_type_ids))?;
+
+        // Run batch inference
+        let outputs = session.run(ort::inputs![
+            "input_ids" => &input_ids_value,
+            "attention_mask" => &attention_mask_value,
+            "token_type_ids" => &token_type_ids_value,
+        ])?;
+
+        // Extract embeddings - output shape is [batch_size, seq_length, hidden_size]
+        let output_tensor = outputs[0].try_extract_tensor::<f32>()?;
+        let (_shape, output_data) = output_tensor;
+
+        // Mean pooling for each item in batch
+        let mut results = Vec::with_capacity(batch_size);
+
+        for batch_idx in 0..batch_size {
+            let mut pooled = vec![0.0; self.dimension];
+            let mut mask_sum = 0.0;
+
+            let batch_offset = batch_idx * max_length * self.dimension;
+            let attention_offset = batch_idx * max_length;
+
+            for seq_idx in 0..max_length {
+                if attention_masks[attention_offset + seq_idx] == 1 {
+                    for dim_idx in 0..self.dimension {
+                        let idx = batch_offset + seq_idx * self.dimension + dim_idx;
+                        pooled[dim_idx] += output_data[idx];
+                    }
+                    mask_sum += 1.0;
+                }
+            }
+
+            // Average
+            if mask_sum > 0.0 {
+                for val in &mut pooled {
+                    *val /= mask_sum;
+                }
+            }
+
+            // L2 normalize
+            let norm: f32 = pooled.iter().map(|x| x * x).sum::<f32>().sqrt();
+            if norm > 0.0 {
+                for val in &mut pooled {
+                    *val /= norm;
+                }
+            }
+
+            results.push(pooled);
+        }
+
+        Ok(results)
+    }
 }
 
 impl Embedder for MiniLMEmbedder {
@@ -629,7 +742,108 @@ impl Embedder for MiniLMEmbedder {
     }
 
     fn encode_batch(&self, texts: &[&str]) -> Result<Vec<Vec<f32>>> {
-        texts.iter().map(|text| self.encode(text)).collect()
+        if texts.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Handle empty strings in batch
+        let empty_embedding = vec![0.0; self.dimension];
+        if texts.iter().all(|t| t.is_empty()) {
+            return Ok(vec![empty_embedding; texts.len()]);
+        }
+
+        // Use simplified mode if in that mode
+        if self.simplified_mode {
+            let start = std::time::Instant::now();
+            let results: Result<Vec<_>> = texts
+                .iter()
+                .map(|text| {
+                    if text.is_empty() {
+                        Ok(vec![0.0; self.dimension])
+                    } else {
+                        self.generate_embedding_simplified(text)
+                    }
+                })
+                .collect();
+            let duration = start.elapsed().as_secs_f64();
+
+            crate::metrics::EMBEDDING_GENERATE_DURATION
+                .with_label_values(&["simplified_batch"])
+                .observe(duration);
+            crate::metrics::EMBEDDING_GENERATE_TOTAL
+                .with_label_values(&[
+                    "simplified_batch",
+                    if results.is_ok() {
+                        "success"
+                    } else {
+                        "failure"
+                    },
+                ])
+                .inc();
+
+            return results;
+        }
+
+        // Try batched ONNX inference
+        let start = std::time::Instant::now();
+
+        // Filter out empty strings and track their positions
+        let (non_empty_texts, empty_indices): (Vec<_>, Vec<_>) =
+            texts.iter().enumerate().partition(|(_, t)| !t.is_empty());
+
+        let non_empty_texts: Vec<&str> = non_empty_texts.into_iter().map(|(_, t)| *t).collect();
+        let empty_indices: Vec<usize> = empty_indices.into_iter().map(|(i, _)| i).collect();
+
+        match self.generate_embeddings_batch_onnx(&non_empty_texts) {
+            Ok(embeddings) => {
+                let duration = start.elapsed().as_secs_f64();
+                crate::metrics::EMBEDDING_GENERATE_DURATION
+                    .with_label_values(&["onnx_batch"])
+                    .observe(duration);
+                crate::metrics::EMBEDDING_GENERATE_TOTAL
+                    .with_label_values(&["onnx_batch", "success"])
+                    .inc();
+
+                // Reconstruct results with empty embeddings in correct positions
+                let mut results = Vec::with_capacity(texts.len());
+                let mut embedding_iter = embeddings.into_iter();
+
+                for i in 0..texts.len() {
+                    if empty_indices.contains(&i) {
+                        results.push(vec![0.0; self.dimension]);
+                    } else {
+                        results.push(
+                            embedding_iter
+                                .next()
+                                .unwrap_or_else(|| vec![0.0; self.dimension]),
+                        );
+                    }
+                }
+
+                Ok(results)
+            }
+            Err(e) => {
+                crate::metrics::EMBEDDING_GENERATE_TOTAL
+                    .with_label_values(&["onnx_batch", "failure"])
+                    .inc();
+                tracing::warn!(
+                    "Batch ONNX inference failed: {}. Falling back to sequential simplified.",
+                    e
+                );
+
+                // Fallback to sequential simplified
+                texts
+                    .iter()
+                    .map(|text| {
+                        if text.is_empty() {
+                            Ok(vec![0.0; self.dimension])
+                        } else {
+                            self.generate_embedding_simplified(text)
+                        }
+                    })
+                    .collect()
+            }
+        }
     }
 }
 

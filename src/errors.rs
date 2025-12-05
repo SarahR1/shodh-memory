@@ -190,7 +190,17 @@ impl AppError {
             code: self.code().to_string(),
             message: self.message(),
             details: None,
-            request_id: None, // Can be set by middleware
+            request_id: None,
+        }
+    }
+
+    /// Convert to structured error response with request ID
+    pub fn to_response_with_request_id(&self, request_id: Option<String>) -> ErrorResponse {
+        ErrorResponse {
+            code: self.code().to_string(),
+            message: self.message(),
+            details: None,
+            request_id,
         }
     }
 }

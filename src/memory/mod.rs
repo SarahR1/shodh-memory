@@ -32,7 +32,14 @@ pub use crate::memory::types::*;
 // pub use crate::memory::vector_storage::{VectorIndexedMemoryStorage, StorageStats};  // Disabled
 use crate::embeddings::Embedder;
 use crate::memory::compression::CompressionPipeline;
+pub use crate::memory::compression::{
+    ConsolidationResult, FactType, SemanticConsolidator, SemanticFact,
+};
 use crate::memory::retrieval::RetrievalEngine;
+pub use crate::memory::retrieval::{
+    AnticipatoryPrefetch, IndexHealth, MemoryGraphStats, PrefetchContext, PrefetchReason,
+    PrefetchResult, ReinforcementStats, RetrievalFeedback, RetrievalOutcome, TrackedRetrieval,
+};
 pub use crate::memory::visualization::{GraphStats, MemoryLogger};
 
 /// Configuration for the memory system
@@ -156,7 +163,8 @@ impl MemorySystem {
     }
 
     /// Record a new experience (takes ownership to avoid clones)
-    pub fn record(&mut self, mut experience: Experience) -> Result<MemoryId> {
+    /// Thread-safe: uses interior mutability for all internal state
+    pub fn record(&self, mut experience: Experience) -> Result<MemoryId> {
         // CRITICAL: Check resource limits before recording to prevent OOM
         self.check_resource_limits()?;
 
@@ -511,7 +519,8 @@ impl MemorySystem {
     }
 
     /// Forget memories based on criteria
-    pub fn forget(&mut self, criteria: ForgetCriteria) -> Result<usize> {
+    /// Thread-safe: uses interior mutability for all internal state
+    pub fn forget(&self, criteria: ForgetCriteria) -> Result<usize> {
         let forgotten_count = match criteria {
             ForgetCriteria::OlderThan(days) => {
                 let cutoff = chrono::Utc::now() - chrono::Duration::days(days as i64);
@@ -808,7 +817,7 @@ impl MemorySystem {
     }
 
     /// Consolidate memories when thresholds are reached
-    fn consolidate_if_needed(&mut self) -> Result<()> {
+    fn consolidate_if_needed(&self) -> Result<()> {
         let working_size = self.working_memory.read().size();
 
         // If working memory is full, move to session
@@ -831,7 +840,7 @@ impl MemorySystem {
     }
 
     /// Move memories from working to session memory
-    fn promote_working_to_session(&mut self) -> Result<()> {
+    fn promote_working_to_session(&self) -> Result<()> {
         let mut working = self.working_memory.write();
         let mut session = self.session_memory.write();
 
@@ -855,7 +864,7 @@ impl MemorySystem {
     }
 
     /// Move memories from session to long-term storage
-    fn promote_session_to_longterm(&mut self) -> Result<()> {
+    fn promote_session_to_longterm(&self) -> Result<()> {
         let mut session = self.session_memory.write();
 
         // Get memories to promote (important ones)
@@ -900,7 +909,7 @@ impl MemorySystem {
     }
 
     /// Compress old memories to save space
-    fn compress_old_memories(&mut self) -> Result<()> {
+    fn compress_old_memories(&self) -> Result<()> {
         let cutoff =
             chrono::Utc::now() - chrono::Duration::days(self.config.compression_age_days as i64);
 
@@ -957,7 +966,7 @@ impl MemorySystem {
     /// Forget memories matching a pattern
     ///
     /// Uses validated regex compilation with ReDoS protection
-    fn forget_by_pattern(&mut self, pattern: &str) -> Result<usize> {
+    fn forget_by_pattern(&self, pattern: &str) -> Result<usize> {
         // Use validated pattern compilation with ReDoS protection
         let regex = crate::validation::validate_and_compile_pattern(pattern)
             .map_err(|e| anyhow::anyhow!("Invalid pattern: {e}"))?;
@@ -1058,5 +1067,184 @@ impl MemorySystem {
         }
 
         Ok(())
+    }
+
+    // =========================================================================
+    // OUTCOME FEEDBACK SYSTEM - Hebbian "Fire Together, Wire Together"
+    // =========================================================================
+
+    /// Retrieve memories with tracking for later feedback
+    ///
+    /// Use this when you want to provide feedback on retrieval quality.
+    /// Returns a TrackedRetrieval that can be used with `reinforce_retrieval`.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let tracked = memory_system.retrieve_tracked(&query)?;
+    /// // Use memories...
+    /// // Later, after task completion:
+    /// memory_system.reinforce_retrieval(&tracked.memory_ids(), RetrievalOutcome::Helpful)?;
+    /// ```
+    pub fn retrieve_tracked(&self, query: &Query) -> Result<TrackedRetrieval> {
+        self.retriever.search_tracked(query, query.max_results)
+    }
+
+    /// Reinforce memories based on task outcome (core feedback loop)
+    ///
+    /// This is THE key method that closes the Hebbian loop:
+    /// - If outcome is Helpful: strengthen associations, boost importance
+    /// - If outcome is Misleading: weaken associations, reduce importance
+    /// - If outcome is Neutral: just record access (mild reinforcement)
+    ///
+    /// CACHE COHERENCY: This method updates BOTH the in-memory caches AND
+    /// persistent storage to ensure importance changes are visible immediately
+    /// through cached references (via Arc interior mutability) AND survive restarts.
+    ///
+    /// # Arguments
+    /// * `memory_ids` - IDs of memories that were used in the task
+    /// * `outcome` - Whether the memories were helpful, misleading, or neutral
+    ///
+    /// # Returns
+    /// Statistics about what was reinforced
+    pub fn reinforce_retrieval(
+        &self,
+        memory_ids: &[MemoryId],
+        outcome: RetrievalOutcome,
+    ) -> Result<ReinforcementStats> {
+        if memory_ids.is_empty() {
+            return Ok(ReinforcementStats::default());
+        }
+
+        let mut stats = ReinforcementStats {
+            memories_processed: memory_ids.len(),
+            outcome: outcome.clone(),
+            ..Default::default()
+        };
+
+        // Handle graph updates via retriever (Hebbian associations)
+        match &outcome {
+            RetrievalOutcome::Helpful => {
+                if memory_ids.len() >= 2 {
+                    self.retriever.graph_mut().record_coactivation(memory_ids);
+                    stats.associations_strengthened = memory_ids.len() * (memory_ids.len() - 1) / 2;
+                }
+            }
+            RetrievalOutcome::Neutral => {
+                if memory_ids.len() >= 2 {
+                    let mut graph = self.retriever.graph_mut();
+                    for window in memory_ids.windows(2) {
+                        graph.add_edge(&window[0], &window[1]);
+                    }
+                    stats.associations_strengthened = memory_ids.len() - 1;
+                }
+            }
+            RetrievalOutcome::Misleading => {
+                // Don't strengthen associations for misleading memories
+            }
+        }
+
+        // CACHE COHERENT IMPORTANCE UPDATES:
+        // 1. First try to find memory in caches (working, session)
+        // 2. If found in cache, modify through the cached Arc (interior mutability)
+        //    This updates ALL holders of this Arc reference
+        // 3. Then persist to storage for durability
+        // 4. If not in cache, get from storage, modify, and persist
+        for id in memory_ids {
+            // Try working memory cache first
+            let cached_memory = {
+                let working = self.working_memory.read();
+                working.get(id)
+            };
+
+            // Try session memory cache if not in working
+            let cached_memory = cached_memory.or_else(|| {
+                let session = self.session_memory.read();
+                session.get(id)
+            });
+
+            if let Some(memory) = cached_memory {
+                // CACHE HIT: Modify through cached Arc (updates all references)
+                memory.record_access();
+                match &outcome {
+                    RetrievalOutcome::Helpful => {
+                        memory.boost_importance(0.05);
+                        stats.importance_boosts += 1;
+                    }
+                    RetrievalOutcome::Misleading => {
+                        memory.decay_importance(0.10);
+                        stats.importance_decays += 1;
+                    }
+                    RetrievalOutcome::Neutral => {
+                        // Just access recorded
+                    }
+                }
+                // PERSIST: Write updated memory to durable storage
+                let _ = self.long_term_memory.update(&memory);
+            } else {
+                // CACHE MISS: Get from storage, modify, and persist
+                if let Ok(memory) = self.long_term_memory.get(id) {
+                    memory.record_access();
+                    match &outcome {
+                        RetrievalOutcome::Helpful => {
+                            memory.boost_importance(0.05);
+                            stats.importance_boosts += 1;
+                        }
+                        RetrievalOutcome::Misleading => {
+                            memory.decay_importance(0.10);
+                            stats.importance_decays += 1;
+                        }
+                        RetrievalOutcome::Neutral => {
+                            // Just access recorded
+                        }
+                    }
+                    // PERSIST: Write to durable storage
+                    let _ = self.long_term_memory.update(&memory);
+                }
+            }
+        }
+
+        Ok(stats)
+    }
+
+    /// Reinforce using a tracked retrieval (convenience wrapper)
+    pub fn reinforce_tracked(
+        &self,
+        tracked: &TrackedRetrieval,
+        outcome: RetrievalOutcome,
+    ) -> Result<ReinforcementStats> {
+        self.retriever.reinforce_tracked(tracked, outcome)
+    }
+
+    /// Perform graph maintenance (decay old edges, prune weak ones)
+    ///
+    /// Call this periodically (e.g., every hour or on user logout)
+    /// to let unused associations naturally fade.
+    pub fn graph_maintenance(&self) {
+        self.retriever.graph_maintenance();
+    }
+
+    /// Get memory graph statistics
+    pub fn graph_stats(&self) -> MemoryGraphStats {
+        self.retriever.graph_stats()
+    }
+}
+
+/// Automatic persistence on drop - ensures vector index and ID mappings survive restarts
+///
+/// This is CRITICAL for local memory: when the system shuts down (gracefully or via drop),
+/// all in-memory state (vector index, ID mappings) must be persisted to disk.
+impl Drop for MemorySystem {
+    fn drop(&mut self) {
+        // Persist vector index and ID mapping for restart recovery
+        if let Err(e) = self.retriever.save() {
+            tracing::error!("Failed to persist vector index on shutdown: {}", e);
+        } else {
+            tracing::info!("Vector index persisted successfully on shutdown");
+        }
+
+        // Flush RocksDB WAL to ensure all writes are durable
+        if let Err(e) = self.long_term_memory.flush() {
+            tracing::error!("Failed to flush storage on shutdown: {}", e);
+        }
     }
 }

@@ -1,8 +1,14 @@
 //! Production-grade retrieval engine for memory search
 //! Integrated with Vamana HNSW and MiniLM embeddings for robotics/drones
+//!
+//! Features Hebbian-inspired adaptive learning:
+//! - Outcome feedback: Memories that help complete tasks get reinforced
+//! - Co-activation strengthening: Memories retrieved together form associations
+//! - Time-based decay: Unused associations naturally weaken
 
 use anyhow::{Context, Result};
 use parking_lot::RwLock;
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
@@ -701,11 +707,361 @@ impl RetrievalEngine {
     pub fn add_to_graph(&self, memory: &Memory) {
         self.graph.write().add_memory(memory);
     }
+
+    /// Record co-activation of memories (Hebbian learning)
+    ///
+    /// Call this when multiple memories are accessed together in a retrieval result.
+    /// Strengthens the associations between them.
+    pub fn record_coactivation(&self, memory_ids: &[MemoryId]) {
+        if memory_ids.len() >= 2 {
+            self.graph.write().record_coactivation(memory_ids);
+        }
+    }
+
+    /// Perform graph maintenance (decay old edges, prune weak ones)
+    ///
+    /// Call this periodically (e.g., every hour or on user logout)
+    pub fn graph_maintenance(&self) {
+        self.graph.write().maintenance();
+    }
+
+    /// Get memory graph statistics
+    pub fn graph_stats(&self) -> MemoryGraphStats {
+        self.graph.read().stats()
+    }
+
+    /// Get mutable access to memory graph (for Hebbian updates)
+    ///
+    /// Returns a write guard to the memory graph for recording coactivations
+    /// and adding edges. The guard is automatically released when dropped.
+    pub fn graph_mut(&self) -> parking_lot::RwLockWriteGuard<'_, MemoryGraph> {
+        self.graph.write()
+    }
+
+    /// Check if vector index needs rebuild and rebuild if necessary
+    ///
+    /// Returns true if rebuild was performed
+    pub fn auto_rebuild_index_if_needed(&self) -> Result<bool> {
+        let mut index = self.vector_index.write();
+        index.auto_rebuild_if_needed()
+    }
+
+    /// Get vector index degradation info
+    pub fn index_health(&self) -> IndexHealth {
+        let index = self.vector_index.read();
+        IndexHealth {
+            total_vectors: index.len(),
+            incremental_inserts: index.incremental_insert_count(),
+            needs_rebuild: index.needs_rebuild(),
+            rebuild_threshold: crate::vector_db::vamana::REBUILD_THRESHOLD,
+        }
+    }
 }
 
-/// Memory graph for associative retrieval
-struct MemoryGraph {
-    adjacency: HashMap<MemoryId, HashSet<MemoryId>>,
+/// Health information about the vector index
+#[derive(Debug, Clone)]
+pub struct IndexHealth {
+    pub total_vectors: usize,
+    pub incremental_inserts: usize,
+    pub needs_rebuild: bool,
+    pub rebuild_threshold: usize,
+}
+
+// ============================================================================
+// OUTCOME FEEDBACK SYSTEM - Hebbian "Fire Together, Wire Together"
+// ============================================================================
+
+/// Outcome of a retrieval operation - used to reinforce or weaken memories
+///
+/// When memories are retrieved and used to complete a task, this feedback
+/// tells the system whether they were helpful, enabling adaptive learning.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RetrievalOutcome {
+    /// Memory helped complete the task successfully
+    /// Triggers: +importance boost, +association strength, +access count
+    Helpful,
+    /// Memory was misleading or caused errors
+    /// Triggers: -importance penalty, relationship weakening
+    Misleading,
+    /// Memory was retrieved but not actionably useful
+    /// Triggers: +access count only (neutral)
+    Neutral,
+}
+
+/// Result of a retrieval with tracking for feedback
+#[derive(Debug, Clone)]
+pub struct TrackedRetrieval {
+    /// The memories that were retrieved
+    pub memories: Vec<SharedMemory>,
+    /// Unique ID for this retrieval (for later feedback)
+    pub retrieval_id: String,
+    /// Query that produced these results
+    pub query_fingerprint: u64,
+    /// Timestamp of retrieval
+    pub retrieved_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl TrackedRetrieval {
+    fn new(memories: Vec<SharedMemory>, query: &Query) -> Self {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        if let Some(text) = &query.query_text {
+            text.hash(&mut hasher);
+        }
+
+        Self {
+            memories,
+            retrieval_id: uuid::Uuid::new_v4().to_string(),
+            query_fingerprint: hasher.finish(),
+            retrieved_at: chrono::Utc::now(),
+        }
+    }
+
+    /// Get memory IDs for feedback
+    pub fn memory_ids(&self) -> Vec<MemoryId> {
+        self.memories.iter().map(|m| m.id.clone()).collect()
+    }
+}
+
+/// Feedback record for a retrieval
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetrievalFeedback {
+    /// Which retrieval this feedback is for
+    pub retrieval_id: String,
+    /// The outcome
+    pub outcome: RetrievalOutcome,
+    /// Optional task context (what was the user trying to do)
+    pub task_context: Option<String>,
+    /// When feedback was provided
+    pub feedback_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl RetrievalEngine {
+    // ========================================================================
+    // OUTCOME FEEDBACK METHODS
+    // ========================================================================
+
+    /// Search with tracking for later feedback
+    ///
+    /// Use this when you want to provide feedback on retrieval quality.
+    /// Returns a TrackedRetrieval that can be used with `reinforce_retrieval`.
+    pub fn search_tracked(&self, query: &Query, limit: usize) -> Result<TrackedRetrieval> {
+        let memories = self.search(query, limit)?;
+        Ok(TrackedRetrieval::new(memories, query))
+    }
+
+    /// Reinforce memories based on task outcome (core feedback loop)
+    ///
+    /// This is THE key method that closes the Hebbian loop:
+    /// - If outcome is Helpful: strengthen associations, boost importance
+    /// - If outcome is Misleading: weaken associations, reduce importance
+    /// - If outcome is Neutral: just record access (mild reinforcement)
+    ///
+    /// Call this after a task completes to indicate which memories helped.
+    pub fn reinforce_retrieval(
+        &self,
+        memory_ids: &[MemoryId],
+        outcome: RetrievalOutcome,
+    ) -> Result<ReinforcementStats> {
+        if memory_ids.is_empty() {
+            return Ok(ReinforcementStats::default());
+        }
+
+        let mut stats = ReinforcementStats {
+            memories_processed: memory_ids.len(),
+            ..Default::default()
+        };
+
+        match outcome {
+            RetrievalOutcome::Helpful => {
+                // 1. Strengthen associations between all retrieved memories
+                //    "Fire together, wire together"
+                if memory_ids.len() >= 2 {
+                    self.graph.write().record_coactivation(memory_ids);
+                    stats.associations_strengthened = memory_ids.len() * (memory_ids.len() - 1) / 2;
+                }
+
+                // 2. Boost importance of helpful memories and PERSIST to storage
+                for id in memory_ids {
+                    if let Ok(memory) = self.storage.get(id) {
+                        // Increment access and apply importance boost
+                        memory.record_access();
+                        memory.boost_importance(0.05); // +5% importance
+
+                        // PERSIST: Write updated memory back to durable storage
+                        if self.storage.update(&memory).is_ok() {
+                            stats.importance_boosts += 1;
+                        }
+                    }
+                }
+            }
+            RetrievalOutcome::Misleading => {
+                // Reduce importance of misleading memories and PERSIST to storage
+                for id in memory_ids {
+                    if let Ok(memory) = self.storage.get(id) {
+                        memory.record_access();
+                        memory.decay_importance(0.10); // -10% importance
+
+                        // PERSIST: Write updated memory back to durable storage
+                        if self.storage.update(&memory).is_ok() {
+                            stats.importance_decays += 1;
+                        }
+                    }
+                }
+                // Don't strengthen associations for misleading memories
+            }
+            RetrievalOutcome::Neutral => {
+                // Just record access, mild reinforcement - PERSIST to storage
+                for id in memory_ids {
+                    if let Ok(memory) = self.storage.get(id) {
+                        memory.record_access();
+
+                        // PERSIST: Write access update to storage
+                        let _ = self.storage.update(&memory);
+                    }
+                }
+                // Mild association strengthening for neutral
+                if memory_ids.len() >= 2 {
+                    let mut graph = self.graph.write();
+                    // Only strengthen adjacent pairs (not all pairs)
+                    for window in memory_ids.windows(2) {
+                        graph.add_edge(&window[0], &window[1]);
+                    }
+                    stats.associations_strengthened = memory_ids.len() - 1;
+                }
+            }
+        }
+
+        stats.outcome = outcome;
+        Ok(stats)
+    }
+
+    /// Reinforce using a tracked retrieval (convenience wrapper)
+    pub fn reinforce_tracked(
+        &self,
+        tracked: &TrackedRetrieval,
+        outcome: RetrievalOutcome,
+    ) -> Result<ReinforcementStats> {
+        let ids = tracked.memory_ids();
+        self.reinforce_retrieval(&ids, outcome)
+    }
+
+    /// Batch reinforce multiple retrievals (for async feedback processing)
+    pub fn reinforce_batch(
+        &self,
+        feedbacks: &[RetrievalFeedback],
+        retrieval_memories: &HashMap<String, Vec<MemoryId>>,
+    ) -> Result<Vec<ReinforcementStats>> {
+        let mut results = Vec::with_capacity(feedbacks.len());
+
+        for feedback in feedbacks {
+            if let Some(memory_ids) = retrieval_memories.get(&feedback.retrieval_id) {
+                let stats = self.reinforce_retrieval(memory_ids, feedback.outcome)?;
+                results.push(stats);
+            }
+        }
+
+        Ok(results)
+    }
+}
+
+/// Statistics from a reinforcement operation
+#[derive(Debug, Clone, Default)]
+pub struct ReinforcementStats {
+    /// How many memories were processed
+    pub memories_processed: usize,
+    /// How many association edges were strengthened
+    pub associations_strengthened: usize,
+    /// How many importance boosts were applied
+    pub importance_boosts: usize,
+    /// How many importance decays were applied
+    pub importance_decays: usize,
+    /// The outcome that triggered this reinforcement
+    pub outcome: RetrievalOutcome,
+}
+
+impl Default for RetrievalOutcome {
+    fn default() -> Self {
+        Self::Neutral
+    }
+}
+
+/// Memory graph for associative retrieval with Hebbian learning
+///
+/// Implements simplified synaptic plasticity:
+/// - Edge strength increases with co-access (Hebbian strengthening)
+/// - Edges decay over time without use
+/// - Strong edges are prioritized in traversal
+pub(crate) struct MemoryGraph {
+    /// Adjacency with edge weights (strength 0.0-1.0)
+    adjacency: HashMap<MemoryId, HashMap<MemoryId, EdgeWeight>>,
+}
+
+/// Edge weight with Hebbian learning properties
+#[derive(Clone)]
+struct EdgeWeight {
+    /// Current strength (0.0 to 1.0)
+    strength: f32,
+    /// Number of co-activations
+    activation_count: u32,
+    /// Last activation timestamp (Unix millis)
+    last_activated: i64,
+}
+
+impl Default for EdgeWeight {
+    fn default() -> Self {
+        Self {
+            strength: 0.5, // Start at medium strength
+            activation_count: 1,
+            last_activated: chrono::Utc::now().timestamp_millis(),
+        }
+    }
+}
+
+impl EdgeWeight {
+    /// Hebbian learning constants
+    const LEARNING_RATE: f32 = 0.15;
+    const DECAY_HALF_LIFE_HOURS: f64 = 168.0; // 1 week
+    const LTP_THRESHOLD: u32 = 5; // Lower threshold for memory associations
+    const MIN_STRENGTH: f32 = 0.05;
+
+    /// Strengthen the edge (called when both memories are accessed together)
+    fn strengthen(&mut self) {
+        self.activation_count += 1;
+        self.last_activated = chrono::Utc::now().timestamp_millis();
+
+        // Hebbian: w_new = w_old + η × (1 - w_old)
+        let boost = Self::LEARNING_RATE * (1.0 - self.strength);
+        self.strength = (self.strength + boost).min(1.0);
+
+        // Long-term potentiation bonus
+        if self.activation_count == Self::LTP_THRESHOLD {
+            self.strength = (self.strength + 0.15).min(1.0);
+        }
+    }
+
+    /// Apply time-based decay, returns true if edge should be pruned
+    fn decay(&mut self) -> bool {
+        let now = chrono::Utc::now().timestamp_millis();
+        let hours_elapsed = (now - self.last_activated) as f64 / 3_600_000.0;
+
+        if hours_elapsed <= 0.0 {
+            return false;
+        }
+
+        // Potentiated edges decay slower
+        let effective_half_life = if self.activation_count >= Self::LTP_THRESHOLD {
+            Self::DECAY_HALF_LIFE_HOURS * 5.0 // 5x slower decay
+        } else {
+            Self::DECAY_HALF_LIFE_HOURS
+        };
+
+        let decay_rate = (0.5_f64).ln() / effective_half_life;
+        let decay_factor = (decay_rate * hours_elapsed).exp() as f32;
+        self.strength *= decay_factor;
+
+        self.strength < Self::MIN_STRENGTH
+    }
 }
 
 impl MemoryGraph {
@@ -715,17 +1071,23 @@ impl MemoryGraph {
         }
     }
 
-    /// Add edge between memories (bidirectional)
-    fn add_edge(&mut self, from: &MemoryId, to: &MemoryId) {
+    /// Add edge between memories (bidirectional) with initial weight
+    pub(crate) fn add_edge(&mut self, from: &MemoryId, to: &MemoryId) {
+        // Forward edge
         self.adjacency
             .entry(from.clone())
             .or_default()
-            .insert(to.clone());
+            .entry(to.clone())
+            .or_default()
+            .strengthen();
 
+        // Backward edge
         self.adjacency
             .entry(to.clone())
             .or_default()
-            .insert(from.clone());
+            .entry(from.clone())
+            .or_default()
+            .strengthen();
     }
 
     /// Add a memory to the graph (creates edges based on related_memories)
@@ -739,30 +1101,53 @@ impl MemoryGraph {
         for causal_id in &memory.experience.causal_chain {
             self.add_edge(&memory.id, causal_id);
         }
-
-        // Note: outcomes are text descriptions, not memory IDs, so we don't add them to graph
     }
 
-    /// Find associated memories using graph traversal
+    /// Record co-access of memories (strengthens their connection)
+    pub(crate) fn record_coactivation(&mut self, memories: &[MemoryId]) {
+        // Strengthen edges between all pairs of co-accessed memories
+        for i in 0..memories.len() {
+            for j in (i + 1)..memories.len() {
+                self.add_edge(&memories[i], &memories[j]);
+            }
+        }
+    }
+
+    /// Find associated memories using weighted graph traversal
+    ///
+    /// Prioritizes stronger edges (higher activation count, more recent)
     fn find_associations(&self, start: &MemoryId, max_depth: usize) -> Result<Vec<MemoryId>> {
         let mut visited = HashSet::new();
         let mut result = Vec::new();
-        let mut queue = vec![(start.clone(), 0)];
 
-        while let Some((current, depth)) = queue.pop() {
+        // Priority queue: (negative_strength for max-heap behavior, depth, id)
+        let mut heap = std::collections::BinaryHeap::new();
+        heap.push((ordered_float::OrderedFloat(1.0_f32), 0_usize, start.clone()));
+
+        while let Some((_, depth, current)) = heap.pop() {
             if depth > max_depth {
                 continue;
             }
 
-            if visited.insert(current.clone()) {
-                if current != *start {
-                    result.push(current.clone());
-                }
+            if !visited.insert(current.clone()) {
+                continue;
+            }
 
-                if let Some(neighbors) = self.adjacency.get(&current) {
-                    for neighbor in neighbors {
-                        if !visited.contains(neighbor) {
-                            queue.push((neighbor.clone(), depth + 1));
+            if current != *start {
+                result.push(current.clone());
+            }
+
+            if let Some(neighbors) = self.adjacency.get(&current) {
+                for (neighbor, weight) in neighbors {
+                    if !visited.contains(neighbor) {
+                        // Apply decay inline (non-mutating check)
+                        let effective_strength = weight.strength;
+                        if effective_strength >= EdgeWeight::MIN_STRENGTH {
+                            heap.push((
+                                ordered_float::OrderedFloat(effective_strength),
+                                depth + 1,
+                                neighbor.clone(),
+                            ));
                         }
                     }
                 }
@@ -771,4 +1156,395 @@ impl MemoryGraph {
 
         Ok(result)
     }
+
+    /// Periodic maintenance: decay edges and prune weak ones
+    fn maintenance(&mut self) {
+        let mut to_remove: Vec<(MemoryId, MemoryId)> = Vec::new();
+
+        for (from_id, neighbors) in &mut self.adjacency {
+            for (to_id, weight) in neighbors.iter_mut() {
+                if weight.decay() {
+                    to_remove.push((from_id.clone(), to_id.clone()));
+                }
+            }
+        }
+
+        // Remove pruned edges
+        for (from_id, to_id) in to_remove {
+            if let Some(neighbors) = self.adjacency.get_mut(&from_id) {
+                neighbors.remove(&to_id);
+            }
+        }
+    }
+
+    /// Get graph statistics
+    fn stats(&self) -> MemoryGraphStats {
+        let mut edge_count = 0;
+        let mut total_strength = 0.0;
+        let mut potentiated_count = 0;
+
+        for neighbors in self.adjacency.values() {
+            for weight in neighbors.values() {
+                edge_count += 1;
+                total_strength += weight.strength;
+                if weight.activation_count >= EdgeWeight::LTP_THRESHOLD {
+                    potentiated_count += 1;
+                }
+            }
+        }
+
+        MemoryGraphStats {
+            node_count: self.adjacency.len(),
+            edge_count: edge_count / 2, // Bidirectional edges counted once
+            avg_strength: if edge_count > 0 {
+                total_strength / edge_count as f32
+            } else {
+                0.0
+            },
+            potentiated_edges: potentiated_count / 2,
+        }
+    }
 }
+
+/// Statistics about the memory graph
+#[derive(Debug, Clone, Default)]
+pub struct MemoryGraphStats {
+    pub node_count: usize,
+    pub edge_count: usize,
+    pub avg_strength: f32,
+    pub potentiated_edges: usize,
+}
+
+// ============================================================================
+// ANTICIPATORY PREFETCH - Context-aware cache warming
+// ============================================================================
+
+/// Context signals used to anticipate which memories will be needed
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PrefetchContext {
+    /// Current project/workspace being worked on
+    pub project_id: Option<String>,
+    /// Current file path being edited
+    pub current_file: Option<String>,
+    /// Recent entities mentioned
+    pub recent_entities: Vec<String>,
+    /// Current time of day (for temporal patterns)
+    pub hour_of_day: Option<u32>,
+    /// Day of week (0=Sunday)
+    pub day_of_week: Option<u32>,
+    /// Recent query patterns (for predictive prefetch)
+    pub recent_queries: Vec<String>,
+    /// Current task type (coding, debugging, reviewing)
+    pub task_type: Option<String>,
+}
+
+impl PrefetchContext {
+    /// Create context from RichContext
+    pub fn from_rich_context(ctx: &super::types::RichContext) -> Self {
+        Self {
+            project_id: ctx.project.project_id.clone(),
+            current_file: ctx.code.current_file.clone(),
+            recent_entities: ctx.conversation.mentioned_entities.clone(),
+            hour_of_day: ctx
+                .temporal
+                .time_of_day
+                .as_ref()
+                .and_then(|t| t.parse().ok()),
+            day_of_week: ctx
+                .temporal
+                .day_of_week
+                .as_ref()
+                .and_then(|d| match d.as_str() {
+                    "Sunday" => Some(0),
+                    "Monday" => Some(1),
+                    "Tuesday" => Some(2),
+                    "Wednesday" => Some(3),
+                    "Thursday" => Some(4),
+                    "Friday" => Some(5),
+                    "Saturday" => Some(6),
+                    _ => None,
+                }),
+            recent_queries: Vec::new(),
+            task_type: ctx.project.current_task.clone(),
+        }
+    }
+
+    /// Create context from current system state
+    pub fn from_current_time() -> Self {
+        let now = chrono::Utc::now();
+        Self {
+            hour_of_day: Some(now.hour()),
+            day_of_week: Some(now.weekday().num_days_from_sunday()),
+            ..Default::default()
+        }
+    }
+}
+
+/// Result of a prefetch operation
+#[derive(Debug, Clone, Default)]
+pub struct PrefetchResult {
+    /// Memory IDs that were prefetched
+    pub prefetched_ids: Vec<MemoryId>,
+    /// Why these memories were selected
+    pub reason: PrefetchReason,
+    /// How many were already cached
+    pub cache_hits: usize,
+    /// How many were fetched from storage
+    pub fetches: usize,
+}
+
+/// Reason for prefetching specific memories
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub enum PrefetchReason {
+    /// Project-based: memories from same project
+    Project(String),
+    /// File-based: memories about related files
+    RelatedFiles,
+    /// Entity-based: memories mentioning same entities
+    SharedEntities,
+    /// Temporal: memories from similar time patterns
+    TemporalPattern,
+    /// Association: strongly associated with recent memories
+    AssociatedMemories,
+    /// Predicted: predicted from query patterns
+    QueryPrediction,
+    #[default]
+    /// Unknown or multiple reasons
+    Mixed,
+}
+
+/// Anticipatory prefetch engine
+///
+/// Pre-warms the memory cache based on contextual signals:
+/// - Project: "I'm working on auth module" → prefetch auth-related memories
+/// - File: "I opened user.rs" → prefetch memories about user.rs and imports
+/// - Temporal: "It's Monday morning" → prefetch Monday morning patterns
+/// - Association: "I just accessed memory A" → prefetch A's strong associations
+pub struct AnticipatoryPrefetch {
+    /// Maximum memories to prefetch at once
+    max_prefetch: usize,
+    /// Minimum association strength for association-based prefetch
+    min_association_strength: f32,
+    /// Temporal window for pattern matching (hours)
+    temporal_window_hours: i64,
+}
+
+impl Default for AnticipatoryPrefetch {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl AnticipatoryPrefetch {
+    pub fn new() -> Self {
+        Self {
+            max_prefetch: 20,
+            min_association_strength: 0.3,
+            temporal_window_hours: 2,
+        }
+    }
+
+    /// Create with custom limits
+    pub fn with_limits(max_prefetch: usize, min_strength: f32, temporal_hours: i64) -> Self {
+        Self {
+            max_prefetch,
+            min_association_strength: min_strength,
+            temporal_window_hours: temporal_hours,
+        }
+    }
+
+    /// Generate prefetch query based on context
+    ///
+    /// This is the main entry point - given a context, determine what memories
+    /// are likely to be needed soon and return a query to fetch them.
+    pub fn generate_prefetch_query(&self, context: &PrefetchContext) -> Option<Query> {
+        // Priority 1: Project-based prefetch (strongest signal)
+        if let Some(project_id) = &context.project_id {
+            return Some(self.project_query(project_id));
+        }
+
+        // Priority 2: Entity-based prefetch
+        if !context.recent_entities.is_empty() {
+            return Some(self.entity_query(&context.recent_entities));
+        }
+
+        // Priority 3: File-based prefetch
+        if let Some(file_path) = &context.current_file {
+            return Some(self.file_query(file_path));
+        }
+
+        // Priority 4: Temporal pattern prefetch
+        if let (Some(hour), Some(day)) = (context.hour_of_day, context.day_of_week) {
+            return Some(self.temporal_query(hour, day));
+        }
+
+        None
+    }
+
+    /// Generate query for project-related memories
+    fn project_query(&self, project_id: &str) -> Query {
+        Query {
+            query_text: Some(format!("project:{}", project_id)),
+            max_results: self.max_prefetch,
+            retrieval_mode: super::types::RetrievalMode::Similarity,
+            ..Default::default()
+        }
+    }
+
+    /// Generate query for entity-related memories
+    fn entity_query(&self, entities: &[String]) -> Query {
+        let query_text = entities.join(" ");
+        Query {
+            query_text: Some(query_text),
+            max_results: self.max_prefetch,
+            retrieval_mode: super::types::RetrievalMode::Similarity,
+            ..Default::default()
+        }
+    }
+
+    /// Generate query for file-related memories
+    fn file_query(&self, file_path: &str) -> Query {
+        // Extract filename for broader search
+        let filename = std::path::Path::new(file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(file_path);
+
+        Query {
+            query_text: Some(format!("file {} code", filename)),
+            max_results: self.max_prefetch,
+            retrieval_mode: super::types::RetrievalMode::Similarity,
+            ..Default::default()
+        }
+    }
+
+    /// Generate query for temporal pattern matching
+    fn temporal_query(&self, hour: u32, _day: u32) -> Query {
+        let now = chrono::Utc::now();
+
+        // Find similar time window
+        let start_hour = if hour >= self.temporal_window_hours as u32 {
+            hour - self.temporal_window_hours as u32
+        } else {
+            0
+        };
+        let end_hour = (hour + self.temporal_window_hours as u32).min(23);
+
+        // Calculate time range for today at similar hours
+        let start = now
+            .with_hour(start_hour)
+            .unwrap_or(now)
+            .with_minute(0)
+            .unwrap_or(now);
+        let end = now
+            .with_hour(end_hour)
+            .unwrap_or(now)
+            .with_minute(59)
+            .unwrap_or(now);
+
+        Query {
+            time_range: Some((start, end)),
+            max_results: self.max_prefetch,
+            retrieval_mode: super::types::RetrievalMode::Temporal,
+            ..Default::default()
+        }
+    }
+
+    /// Get memory IDs that should be prefetched based on associations
+    ///
+    /// Given a set of recently accessed memories, find their strong associations.
+    /// Note: This is pub(crate) because MemoryGraph is internal.
+    pub(crate) fn association_prefetch_ids(
+        &self,
+        recent_ids: &[MemoryId],
+        graph: &MemoryGraph,
+    ) -> Vec<MemoryId> {
+        let mut candidates: HashMap<MemoryId, f32> = HashMap::new();
+        let recent_set: HashSet<_> = recent_ids.iter().collect();
+
+        // Collect strong associations for each recent memory
+        for id in recent_ids {
+            if let Some(neighbors) = graph.adjacency.get(id) {
+                for (neighbor_id, weight) in neighbors {
+                    // Skip if already in recent set
+                    if recent_set.contains(neighbor_id) {
+                        continue;
+                    }
+
+                    // Only include strong associations
+                    if weight.strength >= self.min_association_strength {
+                        *candidates.entry(neighbor_id.clone()).or_default() += weight.strength;
+                    }
+                }
+            }
+        }
+
+        // Sort by total association strength and take top N
+        let mut sorted: Vec<_> = candidates.into_iter().collect();
+        sorted.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+        sorted
+            .into_iter()
+            .take(self.max_prefetch)
+            .map(|(id, _)| id)
+            .collect()
+    }
+
+    /// Score how relevant a memory is to the current context
+    ///
+    /// Higher scores mean more likely to be needed soon.
+    pub fn relevance_score(&self, memory: &Memory, context: &PrefetchContext) -> f32 {
+        let mut score = 0.0;
+
+        // Project match (strong signal)
+        if let Some(project_id) = &context.project_id {
+            if let Some(ctx) = &memory.experience.context {
+                if ctx.project.project_id.as_ref() == Some(project_id) {
+                    score += 0.4;
+                }
+            }
+        }
+
+        // Entity overlap
+        let memory_entities: HashSet<_> = memory.experience.entities.iter().collect();
+        let context_entities: HashSet<_> = context.recent_entities.iter().collect();
+        let overlap = memory_entities.intersection(&context_entities).count();
+        if overlap > 0 {
+            score += 0.2 * (overlap as f32 / context_entities.len().max(1) as f32);
+        }
+
+        // File relevance
+        if let Some(current_file) = &context.current_file {
+            if memory.experience.content.contains(current_file) {
+                score += 0.2;
+            }
+            // Also check related files in context
+            if let Some(ctx) = &memory.experience.context {
+                if ctx.code.related_files.iter().any(|f| f == current_file) {
+                    score += 0.1;
+                }
+            }
+        }
+
+        // Temporal relevance (same hour of day)
+        if let Some(hour) = context.hour_of_day {
+            let memory_hour = memory.created_at.hour();
+            if (memory_hour as i32 - hour as i32).abs() <= self.temporal_window_hours as i32 {
+                score += 0.1;
+            }
+        }
+
+        // Recency boost
+        let age_hours = (chrono::Utc::now() - memory.created_at).num_hours();
+        if age_hours < 24 {
+            score += 0.1;
+        } else if age_hours < 168 {
+            // 1 week
+            score += 0.05;
+        }
+
+        score.min(1.0)
+    }
+}
+
+use chrono::{Datelike, Timelike};

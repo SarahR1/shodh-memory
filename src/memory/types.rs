@@ -7,7 +7,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 /// Unique identifier for memories
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)] // Serialize as plain UUID string, not array
 pub struct MemoryId(pub Uuid);
 
@@ -645,6 +645,49 @@ impl Memory {
     pub fn set_temporal_relevance(&self, relevance: f32) {
         self.metadata.lock().temporal_relevance = relevance;
     }
+
+    // =========================================================================
+    // ADAPTIVE LEARNING METHODS - For outcome feedback loop
+    // =========================================================================
+
+    /// Record that this memory was accessed (updates count and timestamp)
+    ///
+    /// Call this whenever a memory is retrieved, even if just viewed.
+    /// For stronger reinforcement when memory helped a task, use `boost_importance`.
+    pub fn record_access(&self) {
+        let mut meta = self.metadata.lock();
+        meta.last_accessed = Utc::now();
+        meta.access_count += 1;
+    }
+
+    /// Boost importance by a factor (for helpful memories)
+    ///
+    /// Uses additive boost clamped to [0.0, 1.0]:
+    /// - boost of 0.05 = +5% (typical for helpful retrieval)
+    /// - boost of 0.10 = +10% (very helpful, task completed successfully)
+    ///
+    /// Example: memory with importance 0.6 + boost 0.05 -> 0.65
+    pub fn boost_importance(&self, boost: f32) {
+        let mut meta = self.metadata.lock();
+        meta.importance = (meta.importance + boost).clamp(0.0, 1.0);
+    }
+
+    /// Decay importance by a factor (for misleading memories)
+    ///
+    /// Uses multiplicative decay clamped to [0.05, 1.0]:
+    /// - decay of 0.10 = -10% (memory was misleading)
+    /// - Never drops below 0.05 to allow recovery
+    ///
+    /// Example: memory with importance 0.6 - decay 0.10 -> 0.54
+    pub fn decay_importance(&self, decay: f32) {
+        let mut meta = self.metadata.lock();
+        meta.importance = (meta.importance * (1.0 - decay)).max(0.05);
+    }
+
+    /// Get all metadata snapshot (for debugging/stats)
+    pub fn metadata_snapshot(&self) -> MemoryMetadata {
+        self.metadata.lock().clone()
+    }
 }
 
 // Custom serialization for Memory to flatten the Arc<Mutex<>> field
@@ -836,7 +879,7 @@ impl Default for Query {
 }
 
 /// Retrieval modes
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RetrievalMode {
     Similarity,  // Vector similarity search
     Temporal,    // Time-based retrieval

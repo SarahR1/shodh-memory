@@ -1,7 +1,95 @@
 //! P1.3: HTTP request tracking middleware for observability
+//!
+//! Provides:
+//! - Request ID generation and propagation
+//! - HTTP latency and count metrics
+//! - Path normalization to prevent cardinality explosion
 
-use axum::{extract::Request, http::StatusCode, middleware::Next, response::Response};
+use axum::{
+    extract::Request,
+    http::{header::HeaderValue, StatusCode},
+    middleware::Next,
+    response::Response,
+};
 use std::time::Instant;
+use uuid::Uuid;
+
+/// Request ID extension for correlation across logs and errors
+#[derive(Debug, Clone)]
+pub struct RequestId(pub String);
+
+impl RequestId {
+    /// Generate a new unique request ID
+    pub fn new() -> Self {
+        Self(Uuid::new_v4().to_string())
+    }
+
+    /// Create from existing ID string
+    pub fn from_string(id: String) -> Self {
+        Self(id)
+    }
+
+    /// Get the ID as a string slice
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl Default for RequestId {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Display for RequestId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+/// Request ID header name (standard header used by many load balancers)
+pub const REQUEST_ID_HEADER: &str = "X-Request-ID";
+
+/// Middleware to add/propagate request IDs for distributed tracing
+///
+/// Behavior:
+/// - If `X-Request-ID` header is present in request, use it
+/// - Otherwise, generate a new UUID v4
+/// - Add the ID to response headers
+/// - Store in request extensions for downstream handlers
+pub async fn request_id(mut req: Request, next: Next) -> Response {
+    // Extract or generate request ID
+    let request_id = req
+        .headers()
+        .get(REQUEST_ID_HEADER)
+        .and_then(|v| v.to_str().ok())
+        .filter(|s| !s.is_empty() && s.len() <= 64) // Validate length
+        .map(|s| RequestId::from_string(s.to_string()))
+        .unwrap_or_else(RequestId::new);
+
+    // Store in extensions for handlers to access
+    req.extensions_mut().insert(request_id.clone());
+
+    // Add to tracing span
+    let _span = tracing::info_span!(
+        "request",
+        request_id = %request_id,
+        method = %req.method(),
+        path = %req.uri().path()
+    );
+
+    // Process request
+    let mut response = next.run(req).await;
+
+    // Add request ID to response headers
+    if let Ok(header_value) = HeaderValue::from_str(&request_id.0) {
+        response
+            .headers_mut()
+            .insert(REQUEST_ID_HEADER, header_value);
+    }
+
+    response
+}
 
 /// P1.3: Middleware to track HTTP request latency and counts
 pub async fn track_metrics(req: Request, next: Next) -> Result<Response, StatusCode> {

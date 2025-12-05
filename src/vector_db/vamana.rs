@@ -693,6 +693,93 @@ impl VamanaIndex {
             .store(0, std::sync::atomic::Ordering::Relaxed);
     }
 
+    /// Extract all vectors from the index for rebuilding
+    ///
+    /// Returns a clone of all vectors currently in the index.
+    /// Use this before calling `rebuild_from_vectors()`.
+    pub fn extract_all_vectors(&self) -> Vec<Vec<f32>> {
+        match &*self.vectors.read() {
+            VectorStorage::Memory(vecs) => vecs.clone(),
+            VectorStorage::Mmap {
+                mmap,
+                dimension,
+                num_vectors,
+            } => {
+                let mut vecs = Vec::with_capacity(*num_vectors);
+                let total_floats = mmap.len() / std::mem::size_of::<f32>();
+                let float_slice = unsafe {
+                    std::slice::from_raw_parts(mmap.as_ptr() as *const f32, total_floats)
+                };
+
+                for i in 0..*num_vectors {
+                    let start = i * dimension;
+                    let end = start + dimension;
+                    if end <= total_floats {
+                        vecs.push(float_slice[start..end].to_vec());
+                    }
+                }
+                vecs
+            }
+        }
+    }
+
+    /// Rebuild the index from vectors with full Vamana construction
+    ///
+    /// This performs a complete rebuild using robust_prune for optimal graph quality.
+    /// Call this when `needs_rebuild()` returns true to restore recall@10 accuracy.
+    ///
+    /// # Arguments
+    /// * `vectors` - All vectors to index (typically from `extract_all_vectors()`)
+    ///
+    /// # Returns
+    /// * `Ok(())` on success, resets the incremental insert counter
+    pub fn rebuild_from_vectors(&mut self, vectors: Vec<Vec<f32>>) -> Result<()> {
+        if vectors.is_empty() {
+            return Ok(());
+        }
+
+        info!(
+            "Rebuilding Vamana index with {} vectors (was {} incremental inserts)",
+            vectors.len(),
+            self.incremental_insert_count()
+        );
+
+        // Clear current state
+        self.graph.write().clear();
+        *self.vectors.write() = VectorStorage::Memory(Vec::new());
+        self.num_vectors = 0;
+
+        // Full rebuild with robust_prune
+        self.build(vectors)?;
+
+        // Reset counter after successful rebuild
+        self.reset_incremental_counter();
+
+        info!("Vamana index rebuild complete");
+        Ok(())
+    }
+
+    /// Perform automatic rebuild if threshold exceeded
+    ///
+    /// Thread-safe method that checks if rebuild is needed and performs it atomically.
+    /// Returns true if rebuild was performed, false if not needed.
+    ///
+    /// This is safe to call from multiple threads - only one rebuild will occur.
+    pub fn auto_rebuild_if_needed(&mut self) -> Result<bool> {
+        if !self.needs_rebuild() {
+            return Ok(false);
+        }
+
+        // Extract vectors before rebuild
+        let vectors = self.extract_all_vectors();
+        if vectors.is_empty() {
+            return Ok(false);
+        }
+
+        self.rebuild_from_vectors(vectors)?;
+        Ok(true)
+    }
+
     /// Save index to disk
     pub fn save(&self, path: &Path) -> Result<()> {
         use serde::{Deserialize, Serialize};
