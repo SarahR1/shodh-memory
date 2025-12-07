@@ -19,10 +19,7 @@ jobs:
         with:
           components: rustfmt
       - name: Check formatting
-        run: |
-          echo "=== Rust Format Check ==="
-          cargo fmt --all -- --check
-          echo "Format check: PASSED"
+        run: cargo fmt --all -- --check
 
   clippy:
     name: Clippy Analysis
@@ -35,16 +32,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Run Clippy
         run: |
-          echo "=== Clippy Lint Analysis ==="
           cargo clippy --all-targets -- -W clippy::all 2>&1 | tee clippy-output.txt
           WARNINGS=$(grep -c "warning:" clippy-output.txt || true)
-          echo ""
-          echo "=========================================="
-          echo "        CLIPPY SUMMARY"
-          echo "=========================================="
-          echo "Warnings: $WARNINGS"
-          echo "Status: PASSED"
-          echo "=========================================="
+          echo "### Clippy Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Metric | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Warnings | $WARNINGS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | Passed |" >> $GITHUB_STEP_SUMMARY
 
   build:
     name: Build (${{ matrix.os }})
@@ -53,32 +48,35 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
       - name: Build Release
-        run: |
-          echo "=== Building Release Binary ==="
-          cargo build --release 2>&1 | tee build-output.txt
-          echo ""
-          echo "Build completed successfully"
+        run: cargo build --release
 
-      - name: Display build info
-        shell: bash
+      - name: Display build info (Unix)
+        if: matrix.os != 'windows-latest'
         run: |
-          echo ""
-          echo "=========================================="
-          echo "        BUILD SUMMARY (${{ matrix.os }})"
-          echo "=========================================="
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            ls -lh target/release/shodh-memory-server.exe 2>/dev/null || echo "Binary not found"
-          else
-            ls -lh target/release/shodh-memory-server 2>/dev/null || echo "Binary not found"
-          fi
-          echo "=========================================="
+          SIZE=$(ls -lh target/release/shodh-memory-server 2>/dev/null | awk '{print $5}' || echo "N/A")
+          echo "### Build Results (${{ matrix.os }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Binary | Size |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| shodh-memory-server | $SIZE |" >> $GITHUB_STEP_SUMMARY
+
+      - name: Display build info (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $file = Get-Item target/release/shodh-memory-server.exe -ErrorAction SilentlyContinue
+          $size = if ($file) { "{0:N2} MB" -f ($file.Length / 1MB) } else { "N/A" }
+          "### Build Results (${{ matrix.os }})" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+          "" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+          "| Binary | Size |" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+          "|--------|------|" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+          "| shodh-memory-server.exe | $size |" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
 
       - name: Upload binary (Linux)
         if: matrix.os == 'ubuntu-latest'
@@ -105,62 +103,120 @@ jobs:
           if-no-files-found: ignore
 
   test:
-    name: Rust Tests
+    name: Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
-      - name: Run unit tests
+      - name: Run all tests
         run: |
-          echo "=== Running Rust Unit Tests ==="
-          cargo test --lib 2>&1 | tee test-output.txt
+          cargo test --lib --no-fail-fast 2>&1 | tee test-output.txt
 
-      - name: Display test metrics
+      - name: Generate test summary
         if: always()
         run: |
-          echo ""
-          echo "=========================================="
-          echo "        RUST TEST METRICS"
-          echo "=========================================="
           PASSED=$(grep -oP '\d+(?= passed)' test-output.txt | tail -1 || echo "0")
           FAILED=$(grep -oP '\d+(?= failed)' test-output.txt | tail -1 || echo "0")
           IGNORED=$(grep -oP '\d+(?= ignored)' test-output.txt | tail -1 || echo "0")
-          echo "Passed:  $PASSED"
-          echo "Failed:  $FAILED"
-          echo "Ignored: $IGNORED"
-          echo "=========================================="
+
+          echo "## Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Status | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Passed | $PASSED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Failed | $FAILED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Ignored | $IGNORED |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          if [ "$FAILED" != "0" ]; then
+            echo "### Failed Tests" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -A 5 "FAILED" test-output.txt >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+  benchmark:
+    name: Benchmarks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Run benchmarks
+        run: |
+          cargo bench --no-run 2>&1 || true
+          cargo bench 2>&1 | tee bench-output.txt || true
+
+      - name: Parse and display benchmark results
+        if: always()
+        run: |
+          echo "## Benchmark Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Benchmark | Time | Throughput |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|------|------------|" >> $GITHUB_STEP_SUMMARY
+
+          # Parse criterion output
+          while IFS= read -r line; do
+            if [[ "$line" =~ ^([a-zA-Z_/]+)[[:space:]]+time:[[:space:]]+\[([0-9.]+)[[:space:]]([a-zµ]+) ]]; then
+              name="${BASH_REMATCH[1]}"
+              time="${BASH_REMATCH[2]}"
+              unit="${BASH_REMATCH[3]}"
+              echo "| $name | $time $unit | - |" >> $GITHUB_STEP_SUMMARY
+            fi
+          done < bench-output.txt
+
+          # If no benchmarks found, show raw output
+          if ! grep -q "time:" bench-output.txt 2>/dev/null; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Raw Output" >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            tail -50 bench-output.txt >> $GITHUB_STEP_SUMMARY
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: target/criterion
+          if-no-files-found: ignore
 
   summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [format, clippy, build, test]
+    needs: [format, clippy, build, test, benchmark]
     if: always()
     steps:
-      - name: Generate summary
+      - name: Generate final summary
         run: |
-          echo ""
-          echo "============================================"
-          echo "         CI PIPELINE SUMMARY"
-          echo "============================================"
-          echo ""
-          echo "Rust Checks:"
-          echo "  Format:        ${{ needs.format.result }}"
-          echo "  Clippy:        ${{ needs.clippy.result }}"
-          echo "  Build:         ${{ needs.build.result }}"
-          echo "  Tests:         ${{ needs.test.result }}"
-          echo ""
-          echo "============================================"
-          echo ""
+          echo "# CI Pipeline Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          format_icon="${{ needs.format.result == 'success' && '✅' || '❌' }}"
+          clippy_icon="${{ needs.clippy.result == 'success' && '✅' || '❌' }}"
+          build_icon="${{ needs.build.result == 'success' && '✅' || '❌' }}"
+          test_icon="${{ needs.test.result == 'success' && '✅' || '❌' }}"
+          bench_icon="${{ needs.benchmark.result == 'success' && '✅' || '⚠️' }}"
+
+          echo "| Format | $format_icon ${{ needs.format.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Clippy | $clippy_icon ${{ needs.clippy.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build | $build_icon ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | $test_icon ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Benchmarks | $bench_icon ${{ needs.benchmark.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
 
           if [[ "${{ needs.format.result }}" == "success" && \
                 "${{ needs.clippy.result }}" == "success" && \
                 "${{ needs.build.result }}" == "success" && \
                 "${{ needs.test.result }}" == "success" ]]; then
-            echo "All checks PASSED"
+            echo "### All critical checks passed" >> $GITHUB_STEP_SUMMARY
             exit 0
           else
-            echo "Some checks FAILED"
+            echo "### Some checks failed" >> $GITHUB_STEP_SUMMARY
             exit 1
           fi
