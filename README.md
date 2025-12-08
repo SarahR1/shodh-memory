@@ -236,30 +236,47 @@ Importance also increases with: content length, entity density, technical terms,
 
 All protected endpoints require `X-API-Key` header.
 
-| Endpoint | Method | Description | Typical Latency |
-|----------|--------|-------------|-----------------|
-| `/api/remember` | POST | Store memory with NER extraction | ~50ms |
-| `/api/recall` | POST | Semantic search | ~30ms |
-| `/api/recall/tags` | POST | Tag-based search (no embedding) | ~1ms |
-| `/api/recall/entities` | POST | Entity-based retrieval (NER) | ~10ms |
-| `/api/retrieve/tracked` | POST | Search with feedback tracking | ~30ms |
-| `/api/reinforce` | POST | Hebbian reinforcement feedback | ~10ms |
-| `/api/batch_remember` | POST | Store multiple memories | ~130ms/item |
-| `/api/consolidate` | POST | Trigger semantic consolidation | ~250ms |
-| `/api/record` | POST | Store experience (legacy) | ~30ms |
-| `/api/retrieve` | POST | Semantic search (legacy) | ~30ms |
-| `/api/memories` | POST | List all memories | varies |
-| `/api/memory/{id}` | GET/PUT/DELETE | Single memory operations | ~10ms |
-| `/api/users/{id}/stats` | GET | User statistics | ~10ms |
-| `/api/graph/{id}/stats` | GET | Knowledge graph statistics | ~10ms |
-| `/api/brain/{user_id}` | GET | 3-tier state visualization | ~50ms |
-| `/api/search/advanced` | POST | Multi-filter search | ~50ms |
+| Endpoint | Method | Description | Avg Latency |
+|----------|--------|-------------|-------------|
+| **Core Memory** ||||
+| `/api/remember` | POST | Store memory (embedding + NER) | 55ms |
+| `/api/recall` | POST | Semantic search | 45ms |
+| `/api/recall/tags` | POST | Tag-based search (no embedding) | 1ms |
+| `/api/recall/entities` | POST | Entity-based retrieval (NER) | 10ms |
+| `/api/list/{user_id}` | GET | List all memories | 1ms |
+| `/api/context_summary` | POST | Categorized context for session bootstrap | 15ms |
+| **Forget Operations** ||||
+| `/api/forget/age` | POST | Delete memories older than threshold | 5ms |
+| `/api/forget/importance` | POST | Delete low-importance memories | 5ms |
+| `/api/forget/pattern` | POST | Delete memories matching regex | 10ms |
+| `/api/forget/tags` | POST | Delete memories by tags | 5ms |
+| `/api/forget/date` | POST | Delete memories in date range | 5ms |
+| **Hebbian Learning** ||||
+| `/api/retrieve/tracked` | POST | Search with feedback tracking | 45ms |
+| `/api/reinforce` | POST | Hebbian reinforcement feedback | 10ms |
+| **Batch & Consolidation** ||||
+| `/api/batch_remember` | POST | Store multiple memories | 55ms/item |
+| `/api/consolidate` | POST | Trigger semantic consolidation | 250ms |
+| **Introspection** ||||
+| `/api/memory/{id}` | GET/PUT/DELETE | Single memory operations | 10ms |
+| `/api/users/{id}/stats` | GET | User statistics | 10ms |
+| `/api/graph/{id}/stats` | GET | Knowledge graph statistics | 10ms |
+| `/api/brain/{user_id}` | GET | 3-tier state visualization | 50ms |
+| `/api/search/advanced` | POST | Multi-filter search | 50ms |
+| **Health & Metrics** ||||
 | `/health` | GET | Health check (no auth) | <1ms |
 | `/health/live` | GET | Kubernetes liveness (no auth) | <1ms |
 | `/health/ready` | GET | Kubernetes readiness (no auth) | <1ms |
 | `/metrics` | GET | Prometheus metrics (no auth) | <1ms |
 
-*Latencies measured on release build, x86_64, with warm embeddings cache.*
+**Neural Model Latencies**
+
+| Model | Operation | Avg Latency |
+|-------|-----------|-------------|
+| MiniLM-L6-v2 (25MB) | Embedding generation (384-dim) | 33ms |
+| TinyBERT-NER (15MB) | Entity extraction | 15ms |
+
+*Latencies measured on Intel i7-1355U (10 cores), release build, warm cache.*
 
 **Authentication**
 
