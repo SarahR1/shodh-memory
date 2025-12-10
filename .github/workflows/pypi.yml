@@ -15,13 +15,11 @@ permissions:
 
 jobs:
   build-wheels:
-    name: Build wheels (${{ matrix.os }}, py${{ matrix.python }})
+    name: Build ABI3 wheels (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-        python: ['3.9', '3.10', '3.11', '3.12', '3.13']
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
@@ -35,7 +33,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python }}
+          python-version: '3.11'
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -44,14 +42,14 @@ jobs:
       - name: Install maturin
         run: pip install maturin
 
-      - name: Build wheels
-        run: maturin build --release --target ${{ matrix.target }} --out dist -i python${{ matrix.python }}
+      - name: Build ABI3 wheels (Python 3.8+)
+        run: maturin build --release --target ${{ matrix.target }} --out dist --features python
         shell: bash
 
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: wheels-${{ matrix.os }}-py${{ matrix.python }}
+          name: wheels-${{ matrix.os }}
           path: dist/*.whl
 
   build-sdist:

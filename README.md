@@ -28,13 +28,7 @@ Shodh-Memory fixes that. It's a cognitive memory system—Hebbian learning, acti
 
 **How it works:**
 
-Experiences flow through three tiers based on Cowan's working memory model<br>
-[1]. New information enters capacity-limited working memory, overflows into session storage, and consolidates into long-term memory based on importance. When memories are retrieved together successfully, their connections strengthen—classic Hebbian learning<br>
-[2]. After enough co-activations, those connections become permanent. Unused memories naturally fade. The system learns what matters to *you*.
-
-**What you get:**
-
-Your decisions, errors, and patterns—searchable and private. No cloud. No API keys. Your memory, your machine.
+Experiences flow through three tiers based on Cowan's working memory model [1]. New information enters capacity-limited working memory, overflows into session storage, and consolidates into long-term memory based on importance. When memories are retrieved together successfully, their connections strengthen—classic Hebbian learning [2]. After enough co-activations, those connections become permanent. Unused memories naturally fade.
 
 ```
 Working Memory ──overflow──▶ Session Memory ──importance──▶ Long-Term Memory
@@ -47,35 +41,27 @@ Working Memory ──overflow──▶ Session Memory ──importance──▶ 
 
 - Vamana graph index for approximate nearest neighbor search [3]
 - MiniLM-L6 embeddings (384-dim, 25MB) for semantic similarity
-- TinyBERT NER (15MB) for named entity extraction (Person, Organization, Location, Misc)
+- TinyBERT NER (15MB) for entity extraction (Person, Organization, Location, Misc)
 - RocksDB for durable persistence across restarts
-- User isolation — each agent gets independent memory space
 
 **Cognitive Processing**
 
-- *Named entity recognition* — TinyBERT extracts Person, Organization, Location, Misc entities on every memory store; entities boost importance and enable graph relationships
-- *Activation decay* — exponential decay A(t) = A₀ · e^(-λt) applied each maintenance cycle (λ configurable)
-- *Hebbian strengthening* — co-retrieved memories form graph edges; edge weight w increases as w' = w + α(1 - w) on each co-activation
-- *Long-term potentiation* — edges surviving threshold co-activations (default: 5) become permanent, exempt from decay
-- *Importance scoring* — composite score from memory type, content length, entity density, technical terms, access frequency
+- *Named entity recognition* — TinyBERT extracts entities; boosts importance and enables graph relationships
+- *Spreading activation retrieval* — queries activate related memories through semantic and graph connections [5]
+- *Activation decay* — exponential decay A(t) = A₀ · e^(-λt) applied each maintenance cycle
+- *Hebbian strengthening* — co-retrieved memories form graph edges; weight increases on co-activation
+- *Long-term potentiation* — edges surviving threshold co-activations become permanent
 
 **Semantic Consolidation**
 
 - Episodic memories older than 7 days compress into semantic facts
 - Entity extraction preserves key information during compression
-- Original experiences archived, compressed form used for retrieval
-
-**Context Bootstrapping**
-
-- `context_summary()` provides categorized session context on startup
-- Returns decisions, learnings, patterns, errors — structured for LLM consumption
-- `brain_state()` exposes full 3-tier visualization data
 
 ### Use cases
 
-**Local LLM memory** — Give Claude, GPT, or any local model persistent memory across sessions. Remember user preferences, past decisions, learned patterns.
+**Local LLM memory** — Give Claude, GPT, or any local model persistent memory across sessions.
 
-**Robotics & drones** — On-device experience accumulation. A robot that remembers which actions worked, which failed, without cloud round-trips.
+**Robotics & drones** — On-device experience accumulation without cloud round-trips.
 
 **Edge AI** — Run on Jetson, Raspberry Pi, industrial PCs. Sub-millisecond retrieval, zero network dependency.
 
@@ -93,42 +79,33 @@ Working Memory ──overflow──▶ Session Memory ──importance──▶ 
 
 ### Performance
 
-Measured with cold TCP connections on Intel i7-1355U (10 cores, 1.7GHz), release build.
+Measured on Intel i7-1355U (10 cores, 1.7GHz), release build.
 
-**Real-Time API Latencies**
+**API Latencies**
 
-| Endpoint | Operation | Latency | Notes |
-|----------|-----------|---------|-------|
-| `POST /api/remember` | Store memory (new user) | **227-250ms** | Embedding + RocksDB + index |
-| `POST /api/remember` | Store memory (existing user) | **55-60ms** | Embedding + storage |
-| `POST /api/recall` | Semantic search | **34-58ms** | Embedding + vector search |
-| `POST /api/recall/tags` | Tag-based search | **~1ms** | No embedding needed |
-| `GET /api/list` | List memories | **~1ms** | Direct DB read |
-| `DELETE /api/forget` | Delete memory | **~1ms** | Direct DB delete |
-| `GET /health` | Health check | **~1ms** | HTTP baseline |
+| Endpoint | Operation | Latency |
+|----------|-----------|---------|
+| `POST /api/remember` | Store memory (existing user) | **55-60ms** |
+| `POST /api/recall` | Semantic search | **34-58ms** |
+| `POST /api/recall/tags` | Tag-based search | **~1ms** |
+| `GET /api/list` | List memories | **~1ms** |
+| `GET /health` | Health check | **~1ms** |
 
-**Latency Breakdown (Remember Operation)**
+**Knowledge Graph (Criterion benchmarks)**
 
-| Component | Time |
-|-----------|------|
-| MiniLM-L6-v2 embedding | ~33ms |
-| TinyBERT NER extraction | ~15ms |
-| User lookup/create | ~50-80ms |
-| RocksDB write | ~20-30ms |
-| Vamana index update | ~20-30ms |
-| HTTP overhead | ~1ms |
+| Operation | Latency |
+|-----------|---------|
+| Entity lookup | 763ns |
+| Relationship query | 2.2µs |
+| Hebbian strengthen | 5.7µs |
+| Graph traversal (3-hop) | 30µs |
 
-**Server-Side Metrics (Prometheus)**
+**Neural Models**
 
-```
-Embedding generation: 112ms average (3.24s / 29 calls)
-Distribution:
-  <50ms:  48% of calls
-  <100ms: 52% of calls
-  <250ms: 97% of calls
-```
-
-The system uses two neural models: MiniLM-L6-v2 (25MB, 6-layer Transformer) for semantic embeddings and TinyBERT-NER (15MB) for named entity extraction. Both run quantized INT8 inference via ONNX Runtime.
+| Model | Operation | Latency |
+|-------|-----------|---------|
+| MiniLM-L6-v2 (25MB) | Embedding (384-dim) | 33ms |
+| TinyBERT-NER (15MB) | Entity extraction | 15ms |
 
 ### Installation
 
@@ -210,7 +187,6 @@ Different types get different importance weights in the scoring model:
 - **Task** (+0.15) — work items
 - **Context**, **Observation** (+0.10) — general info
 
-Importance also increases with: content length, entity density, technical terms, and access frequency.
 
 ### API reference
 
@@ -274,15 +250,6 @@ All protected endpoints require `X-API-Key` header.
 | `/health/ready` | GET | Kubernetes readiness (no auth) | <1ms |
 | `/metrics` | GET | Prometheus metrics (no auth) | <1ms |
 
-**Neural Model Latencies**
-
-| Model | Operation | Avg Latency |
-|-------|-----------|-------------|
-| MiniLM-L6-v2 (25MB) | Embedding generation (384-dim) | 33ms |
-| TinyBERT-NER (15MB) | Entity extraction | 15ms |
-
-*Latencies measured on Intel i7-1355U (10 cores), release build, warm cache.*
-
 **Authentication**
 
 ```bash
@@ -292,31 +259,6 @@ curl -H "X-API-Key: sk-shodh-dev-4f8b2c1d9e3a7f5b6d2c8e4a1b9f7d3c" ...
 # Production mode (required)
 export SHODH_API_KEYS="your-secure-key-1,your-secure-key-2"
 export SHODH_ENV=production
-```
-
-**Example: Store and retrieve with Hebbian feedback**
-
-```bash
-# 1. Store a memory
-curl -X POST http://localhost:3030/api/remember \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
-  -d '{"user_id": "agent-1", "content": "Docker requires port 8080", "tags": ["docker"]}'
-# Response: {"id": "abc-123", "success": true}
-
-# 2. Retrieve with tracking
-curl -X POST http://localhost:3030/api/retrieve/tracked \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
-  -d '{"user_id": "agent-1", "query": "port configuration", "limit": 5}'
-# Response: {"tracking_id": "xyz-789", "memories": [...]}
-
-# 3. Send feedback (strengthens associations)
-curl -X POST http://localhost:3030/api/reinforce \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: $API_KEY" \
-  -d '{"user_id": "agent-1", "memory_ids": ["abc-123"], "outcome": "helpful"}'
-# Response: {"memories_processed": 1, "associations_strengthened": 1}
 ```
 
 ### Configuration
@@ -347,6 +289,8 @@ SHODH_ACTIVATION_DECAY=0.95        # Decay factor per cycle
 [3] Subramanya, S.J., et al. (2019). DiskANN: Fast Accurate Billion-point Nearest Neighbor Search on a Single Node. *NeurIPS 2019*. https://papers.nips.cc/paper/9527-diskann-fast-accurate-billion-point-nearest-neighbor-search-on-a-single-node
 
 [4] Dudai, Y., Karni, A., & Born, J. (2015). The Consolidation and Transformation of Memory. *Neuron*, 88(1), 20-32. https://pmc.ncbi.nlm.nih.gov/articles/PMC4183265/
+
+[5] Anderson, J.R. (1983). A Spreading Activation Theory of Memory. *Journal of Verbal Learning and Verbal Behavior*, 22(3), 261-295.
 
 ### License
 
