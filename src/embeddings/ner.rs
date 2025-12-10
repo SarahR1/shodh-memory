@@ -526,9 +526,7 @@ impl NeuralNer {
         use crate::graph_memory::{EntityExtractor, EntityLabel};
 
         // Lazy-load the EntityExtractor (1000+ lines of dictionaries, only init once)
-        let extractor = self
-            .entity_extractor
-            .get_or_init(EntityExtractor::new);
+        let extractor = self.entity_extractor.get_or_init(EntityExtractor::new);
 
         // Extract entities with salience information
         let extracted = extractor.extract_with_salience(text);
@@ -959,7 +957,6 @@ mod tests {
             );
         }
     }
-
 
     // ==================== NerEntity Tests ====================
 

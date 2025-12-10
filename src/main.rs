@@ -1471,13 +1471,14 @@ async fn recall(
 
             // Build the episode-to-memory mapping function
             // EpisodicNode UUID == MemoryId.0 (see process_experience_into_graph)
-            let episode_to_memory = |episode: &EpisodicNode| -> anyhow::Result<Option<SharedMemory>> {
-                let memory_id = MemoryId(episode.uuid);
-                match memory_guard.get_memory(&memory_id) {
-                    Ok(mem) => Ok(Some(Arc::new(mem))),
-                    Err(_) => Ok(None), // Memory may have been deleted
-                }
-            };
+            let episode_to_memory =
+                |episode: &EpisodicNode| -> anyhow::Result<Option<SharedMemory>> {
+                    let memory_id = MemoryId(episode.uuid);
+                    match memory_guard.get_memory(&memory_id) {
+                        Ok(mem) => Ok(Some(Arc::new(mem))),
+                        Err(_) => Ok(None), // Memory may have been deleted
+                    }
+                };
 
             let query = MemoryQuery {
                 query_text: Some(query_for_graph.clone()),

@@ -193,7 +193,6 @@ mod global_entities {
             assert!(found.is_some(), "Should find global city: {}", city);
         }
     }
-
 }
 
 // ==================== Mixed Entity Tests ====================

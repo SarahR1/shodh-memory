@@ -40,13 +40,13 @@ use crate::memory::compression::CompressionPipeline;
 pub use crate::memory::compression::{
     ConsolidationResult, FactType, SemanticConsolidator, SemanticFact,
 };
+pub use crate::memory::graph_retrieval::{spreading_activation_retrieve, ActivatedMemory};
 use crate::memory::retrieval::RetrievalEngine;
 pub use crate::memory::retrieval::{
     AnticipatoryPrefetch, IndexHealth, MemoryGraphStats, PrefetchContext, PrefetchReason,
     PrefetchResult, ReinforcementStats, RetrievalFeedback, RetrievalOutcome, TrackedRetrieval,
 };
 pub use crate::memory::visualization::{GraphStats, MemoryLogger};
-pub use crate::memory::graph_retrieval::{spreading_activation_retrieve, ActivatedMemory};
 
 /// Configuration for the memory system
 #[derive(Debug, Clone, Serialize, Deserialize)]
