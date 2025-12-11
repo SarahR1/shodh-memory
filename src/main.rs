@@ -260,9 +260,8 @@ impl MultiUserMemoryManager {
         };
 
         // Initialize streaming memory extractor
-        let streaming_extractor = Arc::new(streaming::StreamingMemoryExtractor::new(
-            neural_ner.clone(),
-        ));
+        let streaming_extractor =
+            Arc::new(streaming::StreamingMemoryExtractor::new(neural_ner.clone()));
 
         let manager = Self {
             user_memories: Arc::new(parking_lot::Mutex::new(lru::LruCache::new(cache_size))),
@@ -1234,10 +1233,7 @@ async fn streaming_memory_ws(
 }
 
 /// Handle WebSocket connection for streaming memory ingestion
-async fn handle_streaming_socket(
-    socket: axum::extract::ws::WebSocket,
-    state: AppState,
-) {
+async fn handle_streaming_socket(socket: axum::extract::ws::WebSocket, state: AppState) {
     use axum::extract::ws::Message;
     use futures::{SinkExt, StreamExt};
 
@@ -1291,7 +1287,10 @@ async fn handle_streaming_socket(
         }
 
         // Create session
-        let id = state.streaming_extractor.create_session(handshake.clone()).await;
+        let id = state
+            .streaming_extractor
+            .create_session(handshake.clone())
+            .await;
         session_id = Some(id.clone());
 
         // Send acknowledgement
@@ -1325,7 +1324,10 @@ async fn handle_streaming_socket(
     // Note: This is done once per connection, not per message
     let user_memory = {
         // Extract user_id from session
-        let stats = state.streaming_extractor.get_session_stats(&session_id).await;
+        let stats = state
+            .streaming_extractor
+            .get_session_stats(&session_id)
+            .await;
         match stats {
             Some(s) => match state.get_user_memory(&s.user_id) {
                 Ok(m) => m,
@@ -1734,7 +1736,10 @@ async fn recall(
 
     // Run graph-based spreading activation retrieval
     // For "associative" mode, calculate graph density and use density-dependent weights
-    let (graph_activated, retrieval_stats): (Vec<ActivatedMemory>, Option<memory::types::RetrievalStats>) = {
+    let (graph_activated, retrieval_stats): (
+        Vec<ActivatedMemory>,
+        Option<memory::types::RetrievalStats>,
+    ) = {
         let graph = graph_memory.clone();
         let memory = memory_system.clone();
         let query_for_graph = query_text_clone.clone();
@@ -1801,11 +1806,16 @@ async fn recall(
     let graph_activated_count = graph_activated.len();
 
     // Get weights from retrieval stats (density-dependent for associative, fixed for hybrid)
-    let (semantic_weight, graph_weight, linguistic_weight) = if let Some(ref stats) = retrieval_stats {
-        (stats.semantic_weight, stats.graph_weight, stats.linguistic_weight)
-    } else {
-        (0.50, 0.35, 0.15) // Legacy fixed weights
-    };
+    let (semantic_weight, graph_weight, linguistic_weight) =
+        if let Some(ref stats) = retrieval_stats {
+            (
+                stats.semantic_weight,
+                stats.graph_weight,
+                stats.linguistic_weight,
+            )
+        } else {
+            (0.50, 0.35, 0.15) // Legacy fixed weights
+        };
 
     // Add semantic results with their position-based score
     for (rank, memory) in semantic_memories.iter().enumerate() {
@@ -1821,7 +1831,8 @@ async fn recall(
             .or_insert((0.0, activated.memory.clone()));
 
         // Add graph activation score + linguistic score with density-dependent weights
-        entry.0 += graph_weight * activated.activation_score + linguistic_weight * activated.linguistic_score;
+        entry.0 += graph_weight * activated.activation_score
+            + linguistic_weight * activated.linguistic_score;
     }
 
     // Sort by final hybrid score and take top N

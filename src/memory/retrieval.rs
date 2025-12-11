@@ -1068,7 +1068,7 @@ impl Default for EdgeWeight {
     fn default() -> Self {
         Self {
             strength: EDGE_INITIAL_STRENGTH, // From constants.rs (0.5)
-            activation_count: 0, // Start at 0, strengthen() will increment to 1
+            activation_count: 0,             // Start at 0, strengthen() will increment to 1
             last_activated: chrono::Utc::now().timestamp_millis(),
         }
     }

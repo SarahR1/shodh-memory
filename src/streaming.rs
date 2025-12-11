@@ -535,9 +535,7 @@ impl StreamingMemoryExtractor {
 
                 if should_extract {
                     drop(sessions);
-                    return self
-                        .extract_memories(session_id, memory_system)
-                        .await;
+                    return self.extract_memories(session_id, memory_system).await;
                 }
 
                 ExtractionResult::Ack {
@@ -567,7 +565,12 @@ impl StreamingMemoryExtractor {
                         .unwrap_or(false)
                 };
 
-                let content = format!("[{}] {}: {}", severity.unwrap_or_default(), event, description);
+                let content = format!(
+                    "[{}] {}: {}",
+                    severity.unwrap_or_default(),
+                    event,
+                    description
+                );
                 let mut metadata: HashMap<String, serde_json::Value> = data;
                 metadata.insert("event_type".to_string(), serde_json::json!(event));
 
@@ -588,9 +591,7 @@ impl StreamingMemoryExtractor {
                 }
 
                 if is_trigger {
-                    return self
-                        .extract_memories(session_id, memory_system)
-                        .await;
+                    return self.extract_memories(session_id, memory_system).await;
                 }
 
                 ExtractionResult::Ack {
@@ -629,9 +630,7 @@ impl StreamingMemoryExtractor {
                 // Sensors use time-based extraction primarily
                 if session.should_extract_by_time() || session.should_extract_by_size() {
                     drop(sessions);
-                    return self
-                        .extract_memories(session_id, memory_system)
-                        .await;
+                    return self.extract_memories(session_id, memory_system).await;
                 }
 
                 ExtractionResult::Ack {
@@ -653,9 +652,7 @@ impl StreamingMemoryExtractor {
             StreamMessage::Close => {
                 // Final extraction before closing
                 drop(sessions);
-                let final_result = self
-                    .extract_memories(session_id, memory_system)
-                    .await;
+                let final_result = self.extract_memories(session_id, memory_system).await;
 
                 // Get total count and remove session
                 let mut sessions = self.sessions.write().await;
@@ -729,9 +726,9 @@ impl StreamingMemoryExtractor {
         // Process each buffered message
         for msg in messages {
             // Calculate importance
-            let importance = msg.importance.unwrap_or_else(|| {
-                Self::calculate_importance(&msg.content, mode, &config)
-            });
+            let importance = msg
+                .importance
+                .unwrap_or_else(|| Self::calculate_importance(&msg.content, mode, &config));
 
             // Skip low importance content
             if importance < config.min_importance {
@@ -777,7 +774,10 @@ impl StreamingMemoryExtractor {
             let mut all_entity_names: Vec<String> =
                 entities.iter().map(|e| e.text.clone()).collect();
             for tag in msg.tags {
-                if !all_entity_names.iter().any(|e| e.eq_ignore_ascii_case(&tag)) {
+                if !all_entity_names
+                    .iter()
+                    .any(|e| e.eq_ignore_ascii_case(&tag))
+                {
                     all_entity_names.push(tag);
                 }
             }
@@ -901,7 +901,9 @@ impl StreamingMemoryExtractor {
     /// Close session and cleanup
     pub async fn close_session(&self, session_id: &str) -> Option<usize> {
         let mut sessions = self.sessions.write().await;
-        sessions.remove(session_id).map(|s| s.total_memories_created)
+        sessions
+            .remove(session_id)
+            .map(|s| s.total_memories_created)
     }
 
     /// Get session stats
@@ -964,11 +966,8 @@ mod tests {
         let config = ExtractionConfig::default();
 
         // Short content = lower importance
-        let short = StreamingMemoryExtractor::calculate_importance(
-            "ok",
-            StreamMode::Conversation,
-            &config,
-        );
+        let short =
+            StreamingMemoryExtractor::calculate_importance("ok", StreamMode::Conversation, &config);
         assert!(short < 0.5);
 
         // Question = higher importance
@@ -999,7 +998,10 @@ mod tests {
             metadata: HashMap::new(),
         };
         assert_eq!(
-            StreamingMemoryExtractor::determine_experience_type(StreamMode::Conversation, &msg_error),
+            StreamingMemoryExtractor::determine_experience_type(
+                StreamMode::Conversation,
+                &msg_error
+            ),
             ExperienceType::Error
         );
 
@@ -1012,7 +1014,10 @@ mod tests {
             metadata: HashMap::new(),
         };
         assert_eq!(
-            StreamingMemoryExtractor::determine_experience_type(StreamMode::Conversation, &msg_default),
+            StreamingMemoryExtractor::determine_experience_type(
+                StreamMode::Conversation,
+                &msg_default
+            ),
             ExperienceType::Conversation
         );
         assert_eq!(

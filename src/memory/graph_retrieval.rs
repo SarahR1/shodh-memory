@@ -63,8 +63,8 @@ pub fn calculate_density_weights(graph_density: f32) -> (f32, f32, f32) {
         DENSITY_GRAPH_WEIGHT_MAX
     } else {
         // Linear interpolation between MIN and MAX
-        let ratio =
-            (graph_density - DENSITY_THRESHOLD_MIN) / (DENSITY_THRESHOLD_MAX - DENSITY_THRESHOLD_MIN);
+        let ratio = (graph_density - DENSITY_THRESHOLD_MIN)
+            / (DENSITY_THRESHOLD_MAX - DENSITY_THRESHOLD_MIN);
         DENSITY_GRAPH_WEIGHT_MIN + ratio * (DENSITY_GRAPH_WEIGHT_MAX - DENSITY_GRAPH_WEIGHT_MIN)
     };
 
@@ -86,7 +86,8 @@ pub fn calculate_density_weights(graph_density: f32) -> (f32, f32, f32) {
 /// Reference: spreadr R package (Siew, 2019)
 pub fn calculate_importance_weighted_decay(importance: f32) -> f32 {
     let clamped_importance = importance.clamp(0.0, 1.0);
-    IMPORTANCE_DECAY_MIN + (1.0 - clamped_importance) * (IMPORTANCE_DECAY_MAX - IMPORTANCE_DECAY_MIN)
+    IMPORTANCE_DECAY_MIN
+        + (1.0 - clamped_importance) * (IMPORTANCE_DECAY_MAX - IMPORTANCE_DECAY_MIN)
 }
 
 /// Spreading activation retrieval (legacy - uses fixed weights)

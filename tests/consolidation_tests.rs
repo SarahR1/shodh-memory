@@ -1000,7 +1000,9 @@ fn test_consolidation_event_buffer_clear() {
     let (system, _temp) = setup_memory_system();
 
     // Generate some events
-    system.record(create_experience("Buffer clear test")).unwrap();
+    system
+        .record(create_experience("Buffer clear test"))
+        .unwrap();
     let query = Query {
         query_text: Some("Buffer".to_string()),
         ..Default::default()

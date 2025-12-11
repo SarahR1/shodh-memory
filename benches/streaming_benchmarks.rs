@@ -61,10 +61,26 @@ const EVENT_MESSAGES: &[(&str, &str, &str)] = &[
     ("warning", "memory", "Memory usage exceeded 80% threshold"),
     ("error", "network", "Connection timeout to API endpoint"),
     ("info", "task", "Background job completed: data sync"),
-    ("decision", "routing", "Selected path A based on traffic analysis"),
-    ("discovery", "pattern", "Detected recurring user behavior pattern"),
-    ("learning", "model", "Updated preference model with new data"),
-    ("error", "validation", "Invalid input format received from user"),
+    (
+        "decision",
+        "routing",
+        "Selected path A based on traffic analysis",
+    ),
+    (
+        "discovery",
+        "pattern",
+        "Detected recurring user behavior pattern",
+    ),
+    (
+        "learning",
+        "model",
+        "Updated preference model with new data",
+    ),
+    (
+        "error",
+        "validation",
+        "Invalid input format received from user",
+    ),
     ("info", "cleanup", "Garbage collection freed 256MB"),
 ];
 
@@ -194,7 +210,11 @@ fn bench_session_creation(c: &mut Criterion) {
     });
 
     // Different stream modes
-    for mode in [StreamMode::Conversation, StreamMode::Sensor, StreamMode::Event] {
+    for mode in [
+        StreamMode::Conversation,
+        StreamMode::Sensor,
+        StreamMode::Event,
+    ] {
         let mode_name = match mode {
             StreamMode::Conversation => "conversation",
             StreamMode::Sensor => "sensor",
@@ -315,10 +335,22 @@ fn bench_importance_calculation(c: &mut Criterion) {
     let test_contents = vec![
         ("short_neutral", "Weather is nice today"),
         ("short_important", "CRITICAL: System failure detected"),
-        ("with_entities", "Satya Nadella announced Microsoft partnership with OpenAI"),
-        ("with_numbers", "Revenue increased by 45% to reach $50 billion"),
-        ("error_content", "Error: Connection failed to database server unexpectedly"),
-        ("decision_content", "Decision made to proceed with plan A for the deployment"),
+        (
+            "with_entities",
+            "Satya Nadella announced Microsoft partnership with OpenAI",
+        ),
+        (
+            "with_numbers",
+            "Revenue increased by 45% to reach $50 billion",
+        ),
+        (
+            "error_content",
+            "Error: Connection failed to database server unexpectedly",
+        ),
+        (
+            "decision_content",
+            "Decision made to proceed with plan A for the deployment",
+        ),
     ];
 
     for (name, content) in test_contents {
@@ -386,7 +418,8 @@ fn bench_message_processing(c: &mut Criterion) {
     // Content message processing
     group.bench_function("process_content_message", |b| {
         let extractor = StreamingMemoryExtractor::new(Arc::clone(&ner));
-        let session_id = rt.block_on(extractor.create_session(create_handshake(StreamMode::Conversation)));
+        let session_id =
+            rt.block_on(extractor.create_session(create_handshake(StreamMode::Conversation)));
 
         b.iter(|| {
             let msg = create_content_message(CONVERSATION_MESSAGES[0]);
@@ -409,7 +442,8 @@ fn bench_message_processing(c: &mut Criterion) {
     // Sensor message processing
     group.bench_function("process_sensor_message", |b| {
         let extractor = StreamingMemoryExtractor::new(Arc::clone(&ner));
-        let session_id = rt.block_on(extractor.create_session(create_handshake(StreamMode::Sensor)));
+        let session_id =
+            rt.block_on(extractor.create_session(create_handshake(StreamMode::Sensor)));
 
         b.iter(|| {
             let (sensor_id, value, unit) = SENSOR_READINGS[0];
@@ -421,7 +455,8 @@ fn bench_message_processing(c: &mut Criterion) {
     // Ping message (baseline)
     group.bench_function("process_ping", |b| {
         let extractor = StreamingMemoryExtractor::new(Arc::clone(&ner));
-        let session_id = rt.block_on(extractor.create_session(create_handshake(StreamMode::Conversation)));
+        let session_id =
+            rt.block_on(extractor.create_session(create_handshake(StreamMode::Conversation)));
 
         b.iter(|| {
             rt.block_on(extractor.process_message(
@@ -460,7 +495,8 @@ fn bench_batch_throughput(c: &mut Criterion) {
                 let (memory_system, _temp_dir) = setup_memory_system();
                 let memory_arc = Arc::new(parking_lot::RwLock::new(memory_system));
                 let extractor = StreamingMemoryExtractor::new(Arc::clone(&ner));
-                let session_id = rt.block_on(extractor.create_session(create_handshake(StreamMode::Conversation)));
+                let session_id = rt
+                    .block_on(extractor.create_session(create_handshake(StreamMode::Conversation)));
 
                 // Pre-generate messages
                 let messages: Vec<StreamMessage> = (0..size)
@@ -550,9 +586,16 @@ fn bench_streaming_ner(c: &mut Criterion) {
     // Print entity extraction summary
     eprintln!("\n📊 STREAMING NER SUMMARY:");
     if let Ok(entities) = ner.extract(LONG_CONTENT) {
-        eprintln!("   Long content ({} chars): {} entities", LONG_CONTENT.len(), entities.len());
+        eprintln!(
+            "   Long content ({} chars): {} entities",
+            LONG_CONTENT.len(),
+            entities.len()
+        );
         for e in &entities {
-            eprintln!("     - {} ({:?}, {:.2})", e.text, e.entity_type, e.confidence);
+            eprintln!(
+                "     - {} ({:?}, {:.2})",
+                e.text, e.entity_type, e.confidence
+            );
         }
     }
 }
@@ -583,7 +626,9 @@ fn bench_full_extraction_pipeline(c: &mut Criterion) {
             |(extractor, memory_arc, _temp_dir)| {
                 rt.block_on(async {
                     // Create session
-                    let session_id = extractor.create_session(create_handshake(StreamMode::Conversation)).await;
+                    let session_id = extractor
+                        .create_session(create_handshake(StreamMode::Conversation))
+                        .await;
 
                     // Buffer messages
                     for msg in CONVERSATION_MESSAGES {
@@ -617,7 +662,9 @@ fn bench_full_extraction_pipeline(c: &mut Criterion) {
             },
             |(extractor, memory_arc, _temp_dir)| {
                 rt.block_on(async {
-                    let session_id = extractor.create_session(create_handshake(StreamMode::Event)).await;
+                    let session_id = extractor
+                        .create_session(create_handshake(StreamMode::Event))
+                        .await;
 
                     // Buffer some events
                     for (severity, event, desc) in &EVENT_MESSAGES[..5] {
@@ -674,7 +721,8 @@ fn bench_streaming_summary(c: &mut Criterion) {
 
         // Session creation
         let start = Instant::now();
-        let session_id = rt.block_on(extractor.create_session(create_handshake(StreamMode::Conversation)));
+        let session_id =
+            rt.block_on(extractor.create_session(create_handshake(StreamMode::Conversation)));
         session_times.push(start.elapsed());
 
         // Message buffering
@@ -704,10 +752,26 @@ fn bench_streaming_summary(c: &mut Criterion) {
     }
 
     // Calculate averages
-    let avg_session = session_times.iter().map(|d| d.as_secs_f64() * 1000.0).sum::<f64>() / iterations as f64;
-    let avg_buffer = buffer_times.iter().map(|d| d.as_secs_f64() * 1000.0).sum::<f64>() / iterations as f64;
-    let avg_flush = flush_times.iter().map(|d| d.as_secs_f64() * 1000.0).sum::<f64>() / iterations as f64;
-    let avg_ner = ner_times.iter().map(|d| d.as_secs_f64() * 1000.0).sum::<f64>() / iterations as f64;
+    let avg_session = session_times
+        .iter()
+        .map(|d| d.as_secs_f64() * 1000.0)
+        .sum::<f64>()
+        / iterations as f64;
+    let avg_buffer = buffer_times
+        .iter()
+        .map(|d| d.as_secs_f64() * 1000.0)
+        .sum::<f64>()
+        / iterations as f64;
+    let avg_flush = flush_times
+        .iter()
+        .map(|d| d.as_secs_f64() * 1000.0)
+        .sum::<f64>()
+        / iterations as f64;
+    let avg_ner = ner_times
+        .iter()
+        .map(|d| d.as_secs_f64() * 1000.0)
+        .sum::<f64>()
+        / iterations as f64;
 
     let total = avg_session + avg_buffer + avg_flush;
     let per_message = avg_buffer / CONVERSATION_MESSAGES.len() as f64;
@@ -729,7 +793,10 @@ fn bench_streaming_summary(c: &mut Criterion) {
 
     // Throughput summary
     let msgs_per_sec = (CONVERSATION_MESSAGES.len() as f64 / (total / 1000.0)).round() as u64;
-    println!("📊 THROUGHPUT: ~{} messages/second (including extraction)", msgs_per_sec);
+    println!(
+        "📊 THROUGHPUT: ~{} messages/second (including extraction)",
+        msgs_per_sec
+    );
     println!();
 
     // Edge device estimates

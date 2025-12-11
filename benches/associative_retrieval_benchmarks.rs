@@ -156,11 +156,26 @@ impl CrossDomainScenario {
 
         // Create episodes (memories)
         let episodes = vec![
-            ("I love Seattle's coffee culture, especially the original Starbucks", vec![coffee_id, seattle_id]),
-            ("Amazon was founded in Seattle by Jeff Bezos in 1994", vec![amazon_id, seattle_id, jeff_id]),
-            ("AWS provides cloud computing services for enterprises", vec![aws_id, amazon_id]),
-            ("Jeff Bezos started Amazon in his garage", vec![jeff_id, amazon_id]),
-            ("Seattle is known for its rainy weather and tech companies", vec![seattle_id]),
+            (
+                "I love Seattle's coffee culture, especially the original Starbucks",
+                vec![coffee_id, seattle_id],
+            ),
+            (
+                "Amazon was founded in Seattle by Jeff Bezos in 1994",
+                vec![amazon_id, seattle_id, jeff_id],
+            ),
+            (
+                "AWS provides cloud computing services for enterprises",
+                vec![aws_id, amazon_id],
+            ),
+            (
+                "Jeff Bezos started Amazon in his garage",
+                vec![jeff_id, amazon_id],
+            ),
+            (
+                "Seattle is known for its rainy weather and tech companies",
+                vec![seattle_id],
+            ),
         ];
 
         let mut relevant_episode_ids = HashSet::new();
@@ -240,10 +255,19 @@ impl TemporalChainScenario {
 
         // Create episodes for each event
         let episodes = vec![
-            ("9am standup: discussed the new feature PR #234", vec![standup_id]),
-            ("10am: reviewed PR #234, found edge case in error handling", vec![review_id]),
+            (
+                "9am standup: discussed the new feature PR #234",
+                vec![standup_id],
+            ),
+            (
+                "10am: reviewed PR #234, found edge case in error handling",
+                vec![review_id],
+            ),
             ("2pm: deployed PR #234 to production", vec![deploy_id]),
-            ("3pm: production alert - null pointer exception in new feature", vec![issue_id]),
+            (
+                "3pm: production alert - null pointer exception in new feature",
+                vec![issue_id],
+            ),
         ];
 
         for (content, entities) in episodes {
@@ -295,7 +319,12 @@ impl CooccurrenceScenario {
         // Create team relationships
         // Alice works with Bob on Alpha
         graph
-            .add_relationship(create_relationship(alice_id, bob_id, RelationType::Knows, 0.9))
+            .add_relationship(create_relationship(
+                alice_id,
+                bob_id,
+                RelationType::Knows,
+                0.9,
+            ))
             .expect("Failed");
         graph
             .add_relationship(create_relationship(
@@ -316,7 +345,12 @@ impl CooccurrenceScenario {
 
         // Bob works with Carol on Beta
         graph
-            .add_relationship(create_relationship(bob_id, carol_id, RelationType::Knows, 0.85))
+            .add_relationship(create_relationship(
+                bob_id,
+                carol_id,
+                RelationType::Knows,
+                0.85,
+            ))
             .expect("Failed");
         graph
             .add_relationship(create_relationship(
@@ -373,7 +407,10 @@ impl CooccurrenceScenario {
 /// Compute precision@k
 fn precision_at_k(retrieved: &[Uuid], relevant: &HashSet<Uuid>, k: usize) -> f64 {
     let retrieved_k: Vec<_> = retrieved.iter().take(k).cloned().collect();
-    let true_positives = retrieved_k.iter().filter(|id| relevant.contains(id)).count();
+    let true_positives = retrieved_k
+        .iter()
+        .filter(|id| relevant.contains(id))
+        .count();
     true_positives as f64 / k as f64
 }
 
@@ -408,9 +445,9 @@ fn bench_cross_domain_quality(c: &mut Criterion) {
     // Test starting points in the associative chain:
     // entity_ids[0] = coffee, [1] = Seattle, [2] = Amazon, [3] = AWS, [4] = Jeff Bezos
     let test_cases = vec![
-        (0, "from_coffee_to_aws"),      // Start at coffee, traverse to find AWS (3 hops)
-        (3, "from_aws_to_coffee"),      // Start at AWS, traverse back
-        (4, "from_jeff_to_seattle"),    // Start at Jeff Bezos, find Seattle via Amazon
+        (0, "from_coffee_to_aws"), // Start at coffee, traverse to find AWS (3 hops)
+        (3, "from_aws_to_coffee"), // Start at AWS, traverse back
+        (4, "from_jeff_to_seattle"), // Start at Jeff Bezos, find Seattle via Amazon
     ];
 
     for (start_idx, description) in test_cases {

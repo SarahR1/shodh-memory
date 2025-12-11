@@ -11,7 +11,6 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
-
 /// Maximum number of events to keep in the event buffer
 const MAX_EVENT_BUFFER_SIZE: usize = 1000;
 
@@ -308,7 +307,11 @@ impl ConsolidationEventBuffer {
     }
 
     /// Generate a report from events in a time period
-    pub fn generate_report(&self, since: DateTime<Utc>, until: DateTime<Utc>) -> ConsolidationReport {
+    pub fn generate_report(
+        &self,
+        since: DateTime<Utc>,
+        until: DateTime<Utc>,
+    ) -> ConsolidationReport {
         let events: Vec<_> = self
             .events
             .iter()
@@ -498,10 +501,7 @@ impl ConsolidationEventBuffer {
                     // Track promotions if needed
                 }
 
-                ConsolidationEvent::MaintenanceCycleCompleted {
-                    duration_ms,
-                    ..
-                } => {
+                ConsolidationEvent::MaintenanceCycleCompleted { duration_ms, .. } => {
                     report.statistics.maintenance_cycles += 1;
                     report.statistics.total_maintenance_duration_ms += duration_ms;
                 }

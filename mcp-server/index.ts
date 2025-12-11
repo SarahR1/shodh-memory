@@ -140,7 +140,7 @@ async function isServerAvailable(): Promise<boolean> {
 const server = new Server(
   {
     name: "shodh-memory",
-    version: "0.1.2",
+    version: "0.1.5",
   },
   {
     capabilities: {
@@ -181,7 +181,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: "recall",
-        description: "Search memories by semantic similarity. Use this to find relevant past experiences, decisions, or context.",
+        description: "Search memories using different retrieval modes. Use this to find relevant past experiences, decisions, or context. Modes: 'semantic' (vector similarity), 'associative' (graph traversal - follows learned connections between memories), 'hybrid' (combines both with density-dependent weighting).",
         inputSchema: {
           type: "object",
           properties: {
@@ -193,6 +193,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "number",
               description: "Maximum number of results (default: 5)",
               default: 5,
+            },
+            mode: {
+              type: "string",
+              enum: ["semantic", "associative", "hybrid"],
+              description: "Retrieval mode: 'semantic' for pure vector similarity, 'associative' for graph-based traversal (follows learned connections), 'hybrid' for density-dependent combination (default)",
+              default: "hybrid",
             },
           },
           required: ["query"],
@@ -339,6 +345,23 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           required: ["start", "end"],
         },
       },
+      {
+        name: "consolidation_report",
+        description: "Get a report of what the memory system has been learning. Shows memory strengthening/decay events, edge formation, fact extraction, and maintenance cycles. Use this to understand how your memories are evolving.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            since: {
+              type: "string",
+              description: "Start of report period (ISO 8601 format). Defaults to 24 hours ago.",
+            },
+            until: {
+              type: "string",
+              description: "End of report period (ISO 8601 format). Defaults to now.",
+            },
+          },
+        },
+      },
     ],
   };
 });
@@ -390,22 +413,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "recall": {
-        const { query, limit = 5 } = args as { query: string; limit?: number };
+        const { query, limit = 5, mode = "hybrid" } = args as { query: string; limit?: number; mode?: string };
 
-        const result = await apiCall<{ memories: Memory[] }>("/api/retrieve", "POST", {
+        interface RetrievalStats {
+          mode: string;
+          semantic_candidates: number;
+          graph_candidates: number;
+          graph_density: number;
+          graph_weight: number;
+          semantic_weight: number;
+          graph_hops: number;
+          entities_activated: number;
+          retrieval_time_us: number;
+        }
+
+        interface RecallResponse {
+          memories: Memory[];
+          count: number;
+          retrieval_stats?: RetrievalStats;
+        }
+
+        const result = await apiCall<RecallResponse>("/api/recall", "POST", {
           user_id: USER_ID,
           query,
           limit,
+          mode,
         });
 
         const memories = result.memories || [];
+        const stats = result.retrieval_stats;
 
         if (memories.length === 0) {
           return {
             content: [
               {
                 type: "text",
-                text: `No memories found for: "${query}"`,
+                text: `No memories found for: "${query}" (mode: ${mode})`,
               },
             ],
           };
@@ -419,11 +462,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           })
           .join("\n\n");
 
+        // Build stats summary for associative/hybrid modes
+        let statsText = "";
+        if (stats && (mode === "associative" || mode === "hybrid")) {
+          const graphPct = (stats.graph_weight * 100).toFixed(0);
+          const semPct = (stats.semantic_weight * 100).toFixed(0);
+          statsText = `\n\n[Stats: ${stats.mode} mode | graph=${graphPct}% semantic=${semPct}% | density=${stats.graph_density.toFixed(2)} | ${stats.graph_candidates} graph + ${stats.semantic_candidates} semantic candidates | ${stats.entities_activated} entities | ${(stats.retrieval_time_us / 1000).toFixed(1)}ms]`;
+        }
+
         return {
           content: [
             {
               type: "text",
-              text: `Found ${memories.length} relevant memories:\n\n${formatted}`,
+              text: `Found ${memories.length} relevant memories (${mode} mode):\n\n${formatted}${statsText}`,
             },
           ],
         };
@@ -711,6 +762,133 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case "consolidation_report": {
+        const { since, until } = args as { since?: string; until?: string };
+
+        interface ConsolidationStats {
+          total_memories: number;
+          memories_strengthened: number;
+          memories_decayed: number;
+          memories_at_risk: number;
+          edges_formed: number;
+          edges_strengthened: number;
+          edges_potentiated: number;
+          edges_pruned: number;
+          facts_extracted: number;
+          facts_reinforced: number;
+          maintenance_cycles: number;
+          total_maintenance_duration_ms: number;
+        }
+
+        interface MemoryChange {
+          memory_id: string;
+          content_preview: string;
+          activation_before: number;
+          activation_after: number;
+          change_reason: string;
+          at_risk: boolean;
+          timestamp: string;
+        }
+
+        interface AssociationChange {
+          from_memory_id: string;
+          to_memory_id: string;
+          strength_before: number | null;
+          strength_after: number;
+          co_activations: number | null;
+          reason: string;
+          timestamp: string;
+        }
+
+        interface ConsolidationReport {
+          period: {
+            start: string;
+            end: string;
+          };
+          strengthened_memories: MemoryChange[];
+          decayed_memories: MemoryChange[];
+          formed_associations: AssociationChange[];
+          strengthened_associations: AssociationChange[];
+          potentiated_associations: AssociationChange[];
+          pruned_associations: AssociationChange[];
+          extracted_facts: unknown[];
+          reinforced_facts: unknown[];
+          statistics: ConsolidationStats;
+        }
+
+        const result = await apiCall<ConsolidationReport>("/api/consolidation/report", "POST", {
+          user_id: USER_ID,
+          since,
+          until,
+        });
+
+        const stats = result.statistics;
+        const sections: string[] = [];
+
+        // Calculate event count
+        const eventCount =
+          result.strengthened_memories.length +
+          result.decayed_memories.length +
+          result.formed_associations.length +
+          result.strengthened_associations.length +
+          result.potentiated_associations.length +
+          result.pruned_associations.length +
+          result.extracted_facts.length +
+          result.reinforced_facts.length;
+
+        // Summary header
+        sections.push(`CONSOLIDATION REPORT (${eventCount} events)`);
+        sections.push(`Period: ${result.period.start} to ${result.period.end}`);
+        sections.push('='.repeat(50));
+
+        // Memory changes
+        if (stats.memories_strengthened > 0 || stats.memories_decayed > 0 || stats.memories_at_risk > 0) {
+          const memoryLines: string[] = [];
+          if (stats.memories_strengthened > 0) memoryLines.push(`  + ${stats.memories_strengthened} memories strengthened`);
+          if (stats.memories_decayed > 0) memoryLines.push(`  - ${stats.memories_decayed} memories decayed`);
+          if (stats.memories_at_risk > 0) memoryLines.push(`  ! ${stats.memories_at_risk} memories at risk of forgetting`);
+          sections.push(`MEMORY CHANGES:\n${memoryLines.join('\n')}`);
+        }
+
+        // Edge changes (associations)
+        if (stats.edges_formed > 0 || stats.edges_strengthened > 0 || stats.edges_potentiated > 0 || stats.edges_pruned > 0) {
+          const edgeLines: string[] = [];
+          if (stats.edges_formed > 0) edgeLines.push(`  + ${stats.edges_formed} new associations formed`);
+          if (stats.edges_strengthened > 0) edgeLines.push(`  + ${stats.edges_strengthened} associations strengthened`);
+          if (stats.edges_potentiated > 0) edgeLines.push(`  * ${stats.edges_potentiated} associations became permanent (LTP)`);
+          if (stats.edges_pruned > 0) edgeLines.push(`  - ${stats.edges_pruned} weak associations pruned`);
+          sections.push(`ASSOCIATIONS (Hebbian Learning):\n${edgeLines.join('\n')}`);
+        }
+
+        // Fact changes
+        if (stats.facts_extracted > 0 || stats.facts_reinforced > 0) {
+          const factLines: string[] = [];
+          if (stats.facts_extracted > 0) factLines.push(`  + ${stats.facts_extracted} facts extracted`);
+          if (stats.facts_reinforced > 0) factLines.push(`  + ${stats.facts_reinforced} facts reinforced`);
+          sections.push(`FACTS:\n${factLines.join('\n')}`);
+        }
+
+        // Maintenance cycles
+        if (stats.maintenance_cycles > 0) {
+          const durationSec = (stats.total_maintenance_duration_ms / 1000).toFixed(2);
+          sections.push(`MAINTENANCE: ${stats.maintenance_cycles} cycle(s) completed (${durationSec}s total)`);
+        }
+
+        // No activity message
+        if (eventCount === 0) {
+          sections.push('No consolidation activity in this period. Store and access memories to trigger learning.');
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: sections.join('\n\n'),
+            },
+          ],
+        };
+      }
+
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
@@ -801,7 +979,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Shodh-Memory MCP server v0.1.2 running");
+  console.error("Shodh-Memory MCP server v0.1.5 running");
   console.error(`Connecting to: ${API_URL}`);
   console.error(`User ID: ${USER_ID}`);
 }

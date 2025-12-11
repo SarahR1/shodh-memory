@@ -42,17 +42,17 @@ pub use crate::memory::compression::{
     ConsolidationResult, FactType, SemanticConsolidator, SemanticFact,
 };
 pub use crate::memory::graph_retrieval::{spreading_activation_retrieve, ActivatedMemory};
+pub use crate::memory::introspection::{
+    AssociationChange, ConsolidationEvent, ConsolidationEventBuffer, ConsolidationReport,
+    ConsolidationStats, EdgeFormationReason, FactChange, MemoryChange, PruningReason, ReportPeriod,
+    StrengtheningReason,
+};
 use crate::memory::retrieval::RetrievalEngine;
 pub use crate::memory::retrieval::{
     AnticipatoryPrefetch, IndexHealth, MemoryGraphStats, PrefetchContext, PrefetchReason,
     PrefetchResult, ReinforcementStats, RetrievalFeedback, RetrievalOutcome, TrackedRetrieval,
 };
 pub use crate::memory::visualization::{GraphStats, MemoryLogger};
-pub use crate::memory::introspection::{
-    AssociationChange, ConsolidationEvent, ConsolidationEventBuffer, ConsolidationReport,
-    ConsolidationStats, EdgeFormationReason, FactChange, MemoryChange, PruningReason,
-    ReportPeriod, StrengtheningReason,
-};
 
 /// Configuration for the memory system
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1669,7 +1669,7 @@ impl MemorySystem {
         self.record_consolidation_event(ConsolidationEvent::MaintenanceCycleCompleted {
             memories_processed: decayed_count,
             memories_decayed: decayed_count, // All memories get decay applied
-            edges_pruned: 0, // Graph maintenance doesn't report this yet
+            edges_pruned: 0,                 // Graph maintenance doesn't report this yet
             duration_ms,
             timestamp: now,
         });

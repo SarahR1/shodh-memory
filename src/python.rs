@@ -736,12 +736,13 @@ impl PyMemorySystem {
             "temporal" => RetrievalMode::Temporal,
             "hybrid" => RetrievalMode::Hybrid,
             "causal" => RetrievalMode::Causal,
+            "associative" => RetrievalMode::Associative,
             "spatial" => RetrievalMode::Spatial,
             "mission" => RetrievalMode::Mission,
             "action_outcome" => RetrievalMode::ActionOutcome,
             _ => {
                 return Err(PyValueError::new_err(format!(
-                    "Unknown retrieval mode: {}",
+                    "Unknown retrieval mode: {}. Valid modes: semantic, temporal, hybrid, causal, associative, spatial, mission, action_outcome",
                     mode
                 )))
             }
@@ -1448,6 +1449,272 @@ impl PyMemorySystem {
             );
             result.insert("stats".to_string(), stats.into_py(py));
 
+            Ok(result)
+        })
+    }
+
+    /// Get a report of memory consolidation activity
+    ///
+    /// Shows memory strengthening/decay events, edge formation, fact extraction,
+    /// and maintenance cycles. Use this to understand how memories are evolving.
+    /// Matches REST /api/consolidation/report endpoint.
+    ///
+    /// Args:
+    ///     since: Start of report period (ISO 8601 format). Defaults to 24 hours ago.
+    ///     until: End of report period (ISO 8601 format). Defaults to now.
+    #[pyo3(signature = (since=None, until=None))]
+    fn consolidation_report(
+        &self,
+        since: Option<&str>,
+        until: Option<&str>,
+    ) -> PyResult<HashMap<String, PyObject>> {
+        // Parse since timestamp (default: 24 hours ago)
+        let since_dt: DateTime<Utc> = if let Some(s) = since {
+            s.parse()
+                .map_err(|e| PyValueError::new_err(format!("Invalid 'since' timestamp: {}", e)))?
+        } else {
+            Utc::now() - chrono::Duration::hours(24)
+        };
+
+        // Parse until timestamp (default: now)
+        let until_dt: Option<DateTime<Utc>> =
+            if let Some(u) = until {
+                Some(u.parse().map_err(|e| {
+                    PyValueError::new_err(format!("Invalid 'until' timestamp: {}", e))
+                })?)
+            } else {
+                None
+            };
+
+        let report = self.inner.get_consolidation_report(since_dt, until_dt);
+
+        Python::with_gil(|py| {
+            let mut result = HashMap::new();
+
+            // Period
+            let mut period = HashMap::new();
+            period.insert(
+                "start".to_string(),
+                report.period.start.to_rfc3339().into_py(py),
+            );
+            period.insert(
+                "end".to_string(),
+                report.period.end.to_rfc3339().into_py(py),
+            );
+            result.insert("period".to_string(), period.into_py(py));
+
+            // Statistics (from report.statistics)
+            let mut stats = HashMap::new();
+            stats.insert(
+                "total_memories".to_string(),
+                report.statistics.total_memories.into_py(py),
+            );
+            stats.insert(
+                "memories_strengthened".to_string(),
+                report.statistics.memories_strengthened.into_py(py),
+            );
+            stats.insert(
+                "memories_decayed".to_string(),
+                report.statistics.memories_decayed.into_py(py),
+            );
+            stats.insert(
+                "memories_at_risk".to_string(),
+                report.statistics.memories_at_risk.into_py(py),
+            );
+            stats.insert(
+                "edges_formed".to_string(),
+                report.statistics.edges_formed.into_py(py),
+            );
+            stats.insert(
+                "edges_strengthened".to_string(),
+                report.statistics.edges_strengthened.into_py(py),
+            );
+            stats.insert(
+                "edges_potentiated".to_string(),
+                report.statistics.edges_potentiated.into_py(py),
+            );
+            stats.insert(
+                "edges_pruned".to_string(),
+                report.statistics.edges_pruned.into_py(py),
+            );
+            stats.insert(
+                "facts_extracted".to_string(),
+                report.statistics.facts_extracted.into_py(py),
+            );
+            stats.insert(
+                "facts_reinforced".to_string(),
+                report.statistics.facts_reinforced.into_py(py),
+            );
+            stats.insert(
+                "maintenance_cycles".to_string(),
+                report.statistics.maintenance_cycles.into_py(py),
+            );
+            stats.insert(
+                "total_maintenance_duration_ms".to_string(),
+                report.statistics.total_maintenance_duration_ms.into_py(py),
+            );
+            result.insert("stats".to_string(), stats.into_py(py));
+
+            // Event count (sum of all event lists)
+            let event_count = report.strengthened_memories.len()
+                + report.decayed_memories.len()
+                + report.formed_associations.len()
+                + report.strengthened_associations.len()
+                + report.potentiated_associations.len()
+                + report.pruned_associations.len()
+                + report.extracted_facts.len()
+                + report.reinforced_facts.len();
+            result.insert("event_count".to_string(), event_count.into_py(py));
+
+            // Strengthened memories
+            let strengthened: Vec<HashMap<String, PyObject>> = report
+                .strengthened_memories
+                .iter()
+                .map(|m| {
+                    let mut mem = HashMap::new();
+                    mem.insert("memory_id".to_string(), m.memory_id.clone().into_py(py));
+                    mem.insert(
+                        "content_preview".to_string(),
+                        m.content_preview.clone().into_py(py),
+                    );
+                    mem.insert(
+                        "activation_before".to_string(),
+                        m.activation_before.into_py(py),
+                    );
+                    mem.insert(
+                        "activation_after".to_string(),
+                        m.activation_after.into_py(py),
+                    );
+                    mem.insert("reason".to_string(), m.change_reason.clone().into_py(py));
+                    mem.insert(
+                        "timestamp".to_string(),
+                        m.timestamp.to_rfc3339().into_py(py),
+                    );
+                    mem
+                })
+                .collect();
+            result.insert(
+                "strengthened_memories".to_string(),
+                strengthened.into_py(py),
+            );
+
+            // Decayed memories
+            let decayed: Vec<HashMap<String, PyObject>> = report
+                .decayed_memories
+                .iter()
+                .map(|m| {
+                    let mut mem = HashMap::new();
+                    mem.insert("memory_id".to_string(), m.memory_id.clone().into_py(py));
+                    mem.insert(
+                        "content_preview".to_string(),
+                        m.content_preview.clone().into_py(py),
+                    );
+                    mem.insert(
+                        "activation_before".to_string(),
+                        m.activation_before.into_py(py),
+                    );
+                    mem.insert(
+                        "activation_after".to_string(),
+                        m.activation_after.into_py(py),
+                    );
+                    mem.insert("at_risk".to_string(), m.at_risk.into_py(py));
+                    mem.insert(
+                        "timestamp".to_string(),
+                        m.timestamp.to_rfc3339().into_py(py),
+                    );
+                    mem
+                })
+                .collect();
+            result.insert("decayed_memories".to_string(), decayed.into_py(py));
+
+            // Formed associations
+            let formed: Vec<HashMap<String, PyObject>> = report
+                .formed_associations
+                .iter()
+                .map(|a| {
+                    let mut assoc = HashMap::new();
+                    assoc.insert(
+                        "from_memory_id".to_string(),
+                        a.from_memory_id.clone().into_py(py),
+                    );
+                    assoc.insert(
+                        "to_memory_id".to_string(),
+                        a.to_memory_id.clone().into_py(py),
+                    );
+                    assoc.insert("strength".to_string(), a.strength_after.into_py(py));
+                    assoc.insert("reason".to_string(), a.reason.clone().into_py(py));
+                    assoc.insert(
+                        "timestamp".to_string(),
+                        a.timestamp.to_rfc3339().into_py(py),
+                    );
+                    assoc
+                })
+                .collect();
+            result.insert("formed_associations".to_string(), formed.into_py(py));
+
+            // Pruned associations
+            let pruned: Vec<HashMap<String, PyObject>> = report
+                .pruned_associations
+                .iter()
+                .map(|a| {
+                    let mut assoc = HashMap::new();
+                    assoc.insert(
+                        "from_memory_id".to_string(),
+                        a.from_memory_id.clone().into_py(py),
+                    );
+                    assoc.insert(
+                        "to_memory_id".to_string(),
+                        a.to_memory_id.clone().into_py(py),
+                    );
+                    assoc.insert(
+                        "final_strength".to_string(),
+                        a.strength_before.unwrap_or(0.0).into_py(py),
+                    );
+                    assoc.insert("reason".to_string(), a.reason.clone().into_py(py));
+                    assoc.insert(
+                        "timestamp".to_string(),
+                        a.timestamp.to_rfc3339().into_py(py),
+                    );
+                    assoc
+                })
+                .collect();
+            result.insert("pruned_associations".to_string(), pruned.into_py(py));
+
+            Ok(result)
+        })
+    }
+
+    /// Get all consolidation events since a given timestamp
+    ///
+    /// Returns raw consolidation events for detailed analysis.
+    /// Matches REST /api/consolidation/events endpoint.
+    #[pyo3(signature = (since=None))]
+    fn consolidation_events(
+        &self,
+        since: Option<&str>,
+    ) -> PyResult<Vec<HashMap<String, PyObject>>> {
+        let since_dt: DateTime<Utc> = if let Some(s) = since {
+            s.parse()
+                .map_err(|e| PyValueError::new_err(format!("Invalid 'since' timestamp: {}", e)))?
+        } else {
+            Utc::now() - chrono::Duration::hours(24)
+        };
+
+        let events = self.inner.get_consolidation_events_since(since_dt);
+
+        Python::with_gil(|py| {
+            let result: Vec<HashMap<String, PyObject>> = events
+                .iter()
+                .map(|event| {
+                    let mut evt = HashMap::new();
+                    evt.insert("event_type".to_string(), format!("{:?}", event).into_py(py));
+                    evt.insert(
+                        "timestamp".to_string(),
+                        event.timestamp().to_rfc3339().into_py(py),
+                    );
+                    evt
+                })
+                .collect();
             Ok(result)
         })
     }
