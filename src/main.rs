@@ -2145,7 +2145,6 @@ async fn context_summary(
     }))
 }
 
-
 // =============================================================================
 // PROACTIVE MEMORY SURFACING (SHO-29) - Push-based relevance surfacing
 // =============================================================================
@@ -2406,7 +2405,9 @@ async fn handle_context_monitor_socket(socket: axum::extract::ws::WebSocket, sta
         // Send response (skip "none" responses to reduce noise unless explicitly configured)
         if !matches!(response, relevance::ContextMonitorResponse::None { .. }) {
             if sender
-                .send(Message::Text(serde_json::to_string(&response).unwrap().into()))
+                .send(Message::Text(
+                    serde_json::to_string(&response).unwrap().into(),
+                ))
                 .await
                 .is_err()
             {
