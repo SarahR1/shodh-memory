@@ -24,6 +24,7 @@ pub mod graph_memory;
 pub mod memory;
 pub mod metrics;
 pub mod middleware;
+pub mod relevance;
 pub mod similarity;
 pub mod streaming;
 pub mod tracing_setup;

@@ -30,6 +30,7 @@ mod graph_memory;
 mod memory;
 mod metrics; // P1.1: Observability
 mod middleware; // P1.3: HTTP request tracking
+mod relevance; // SHO-29: Proactive memory surfacing
 mod similarity;
 mod streaming; // SHO-25: Streaming memory ingestion
 mod tracing_setup;
@@ -682,8 +683,13 @@ impl MultiUserMemoryManager {
         Ok(())
     }
 
+    /// Get neural NER for entity extraction (SHO-29: Proactive memory surfacing)
+    pub fn get_neural_ner(&self) -> Arc<NeuralNer> {
+        self.neural_ner.clone()
+    }
+
     /// Get or create graph memory for a user
-    fn get_user_graph(&self, user_id: &str) -> Result<Arc<parking_lot::RwLock<GraphMemory>>> {
+    pub fn get_user_graph(&self, user_id: &str) -> Result<Arc<parking_lot::RwLock<GraphMemory>>> {
         // Try to get from LRU cache (updates LRU order)
         {
             let mut cache = self.graph_memories.lock();
@@ -2137,6 +2143,279 @@ async fn context_summary(
         patterns: sort_and_truncate(patterns, max),
         errors: sort_and_truncate(errors, 3.min(max)), // Limit errors to 3
     }))
+}
+
+
+// =============================================================================
+// PROACTIVE MEMORY SURFACING (SHO-29) - Push-based relevance surfacing
+// =============================================================================
+
+/// POST /api/relevant - Proactive memory surfacing
+/// Returns relevant memories based on current context using entity matching
+/// and semantic similarity. Target latency: <30ms
+#[tracing::instrument(skip(state), fields(user_id = %req.user_id))]
+async fn surface_relevant(
+    State(state): State<AppState>,
+    Json(req): Json<relevance::RelevanceRequest>,
+) -> Result<Json<relevance::RelevanceResponse>, AppError> {
+    validation::validate_user_id(&req.user_id).map_validation_err("user_id")?;
+
+    let memory_sys = state
+        .get_user_memory(&req.user_id)
+        .map_err(AppError::Internal)?;
+    let graph_memory = state
+        .get_user_graph(&req.user_id)
+        .map_err(AppError::Internal)?;
+    let ner = state.get_neural_ner();
+
+    let engine = relevance::RelevanceEngine::new(ner);
+
+    let response = {
+        let memory_sys = memory_sys.clone();
+        let graph_memory = graph_memory.clone();
+        let context = req.context.clone();
+        let config = req.config.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let memory_guard = memory_sys.read();
+            let graph_guard = graph_memory.read();
+            engine.surface_relevant(&context, &*memory_guard, Some(&*graph_guard), &config)
+        })
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
+        .map_err(AppError::Internal)?
+    };
+
+    Ok(Json(response))
+}
+
+/// WebSocket endpoint for context monitoring (SHO-29)
+/// Enables proactive memory surfacing based on streaming context updates
+///
+/// # Protocol
+/// 1. Client connects to WS /api/context/monitor
+/// 2. Client sends handshake: { user_id, config?, debounce_ms? }
+/// 3. Client streams context updates: { context, entities?, config? }
+/// 4. Server responds with relevant memories when threshold met
+async fn context_monitor_ws(
+    ws: axum::extract::ws::WebSocketUpgrade,
+    State(state): State<AppState>,
+) -> impl axum::response::IntoResponse {
+    ws.on_upgrade(|socket| handle_context_monitor_socket(socket, state))
+}
+
+/// Handle WebSocket connection for context monitoring
+async fn handle_context_monitor_socket(socket: axum::extract::ws::WebSocket, state: AppState) {
+    use axum::extract::ws::Message;
+    use futures::{SinkExt, StreamExt};
+
+    let (mut sender, mut receiver) = socket.split();
+    let mut user_id: Option<String> = None;
+    let mut config = relevance::RelevanceConfig::default();
+    let mut _debounce_ms: u64 = 100;
+    let mut last_surface_time = std::time::Instant::now();
+
+    // Wait for handshake message
+    while let Some(msg) = receiver.next().await {
+        let text = match msg {
+            Ok(Message::Text(text)) => text,
+            Ok(Message::Close(_)) => {
+                tracing::debug!("Context monitor WebSocket closed before handshake");
+                return;
+            }
+            Ok(_) => continue,
+            Err(e) => {
+                tracing::warn!("Context monitor WebSocket error before handshake: {}", e);
+                return;
+            }
+        };
+
+        // Parse handshake
+        let handshake: relevance::ContextMonitorHandshake = match serde_json::from_str(&text) {
+            Ok(h) => h,
+            Err(e) => {
+                let error = relevance::ContextMonitorResponse::Error {
+                    code: "INVALID_HANDSHAKE".to_string(),
+                    message: format!("Failed to parse handshake: {}", e),
+                    fatal: true,
+                    timestamp: chrono::Utc::now(),
+                };
+                let _ = sender
+                    .send(Message::Text(serde_json::to_string(&error).unwrap().into()))
+                    .await;
+                return;
+            }
+        };
+
+        // Validate user_id
+        if let Err(e) = validation::validate_user_id(&handshake.user_id) {
+            let error = relevance::ContextMonitorResponse::Error {
+                code: "INVALID_USER_ID".to_string(),
+                message: format!("Invalid user_id: {}", e),
+                fatal: true,
+                timestamp: chrono::Utc::now(),
+            };
+            let _ = sender
+                .send(Message::Text(serde_json::to_string(&error).unwrap().into()))
+                .await;
+            return;
+        }
+
+        user_id = Some(handshake.user_id.clone());
+        if let Some(cfg) = handshake.config {
+            config = cfg;
+        }
+        _debounce_ms = handshake.debounce_ms;
+
+        // Send acknowledgement
+        let ack = relevance::ContextMonitorResponse::Ack {
+            timestamp: chrono::Utc::now(),
+        };
+        if sender
+            .send(Message::Text(serde_json::to_string(&ack).unwrap().into()))
+            .await
+            .is_err()
+        {
+            return;
+        }
+
+        tracing::info!(
+            "Context monitor session started for user {}",
+            handshake.user_id
+        );
+        break;
+    }
+
+    let user_id = match user_id {
+        Some(id) => id,
+        None => return,
+    };
+
+    // Get user memory and graph systems
+    let memory_sys = match state.get_user_memory(&user_id) {
+        Ok(m) => m,
+        Err(e) => {
+            tracing::error!("Failed to get user memory: {}", e);
+            return;
+        }
+    };
+
+    let graph_memory = match state.get_user_graph(&user_id) {
+        Ok(g) => g,
+        Err(e) => {
+            tracing::error!("Failed to get user graph: {}", e);
+            return;
+        }
+    };
+
+    let ner = state.get_neural_ner();
+    let engine = std::sync::Arc::new(relevance::RelevanceEngine::new(ner));
+
+    // Process context updates
+    while let Some(msg) = receiver.next().await {
+        let text = match msg {
+            Ok(Message::Text(text)) => text,
+            Ok(Message::Close(_)) => {
+                tracing::debug!("Context monitor closed by client");
+                return;
+            }
+            Ok(Message::Ping(data)) => {
+                let _ = sender.send(Message::Pong(data)).await;
+                continue;
+            }
+            Ok(_) => continue,
+            Err(e) => {
+                tracing::warn!("Context monitor WebSocket error: {}", e);
+                break;
+            }
+        };
+
+        // Parse context update
+        let update: relevance::ContextUpdate = match serde_json::from_str(&text) {
+            Ok(u) => u,
+            Err(e) => {
+                let error = relevance::ContextMonitorResponse::Error {
+                    code: "INVALID_MESSAGE".to_string(),
+                    message: format!("Failed to parse context update: {}", e),
+                    fatal: false,
+                    timestamp: chrono::Utc::now(),
+                };
+                let _ = sender
+                    .send(Message::Text(serde_json::to_string(&error).unwrap().into()))
+                    .await;
+                continue;
+            }
+        };
+
+        // Debounce check
+        let elapsed = last_surface_time.elapsed();
+        if elapsed < std::time::Duration::from_millis(_debounce_ms) {
+            continue;
+        }
+        last_surface_time = std::time::Instant::now();
+
+        // Use per-message config if provided, otherwise use session config
+        let effective_config = update.config.as_ref().unwrap_or(&config);
+
+        // Surface relevant memories
+        let start = std::time::Instant::now();
+        let memory_sys_clone = memory_sys.clone();
+        let graph_clone = graph_memory.clone();
+        let context = update.context.clone();
+        let cfg = effective_config.clone();
+        let engine_clone = engine.clone();
+
+        let result = tokio::task::spawn_blocking(move || {
+            let memory_guard = memory_sys_clone.read();
+            let graph_guard = graph_clone.read();
+            engine_clone.surface_relevant(&context, &*memory_guard, Some(&*graph_guard), &cfg)
+        })
+        .await;
+
+        let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        let response = match result {
+            Ok(Ok(rel_response)) => {
+                if rel_response.memories.is_empty() {
+                    relevance::ContextMonitorResponse::None {
+                        timestamp: chrono::Utc::now(),
+                    }
+                } else {
+                    relevance::ContextMonitorResponse::Relevant {
+                        memories: rel_response.memories,
+                        detected_entities: rel_response.detected_entities,
+                        latency_ms,
+                        timestamp: chrono::Utc::now(),
+                    }
+                }
+            }
+            Ok(Err(e)) => relevance::ContextMonitorResponse::Error {
+                code: "SURFACE_ERROR".to_string(),
+                message: format!("Failed to surface memories: {}", e),
+                fatal: false,
+                timestamp: chrono::Utc::now(),
+            },
+            Err(e) => relevance::ContextMonitorResponse::Error {
+                code: "TASK_PANIC".to_string(),
+                message: format!("Blocking task panicked: {}", e),
+                fatal: false,
+                timestamp: chrono::Utc::now(),
+            },
+        };
+
+        // Send response (skip "none" responses to reduce noise unless explicitly configured)
+        if !matches!(response, relevance::ContextMonitorResponse::None { .. }) {
+            if sender
+                .send(Message::Text(serde_json::to_string(&response).unwrap().into()))
+                .await
+                .is_err()
+            {
+                break;
+            }
+        }
+    }
+
+    tracing::info!("Context monitor session ended for user {}", user_id);
 }
 
 // =============================================================================
@@ -4941,6 +5220,10 @@ async fn main() -> Result<()> {
         .route("/api/brain/{user_id}", get(get_brain_state))
         // Context Summary - Session bootstrap with categorized memories
         .route("/api/context_summary", post(context_summary))
+        // Proactive Memory Surfacing (SHO-29) - Push-based relevance
+        .route("/api/relevant", post(surface_relevant))
+        // Context Monitor WebSocket (SHO-29) - Streaming context surfacing
+        .route("/api/context/monitor", get(context_monitor_ws))
         // Consolidation Introspection - What the memory system is learning
         .route("/api/consolidation/report", post(get_consolidation_report))
         .route("/api/consolidation/events", post(get_consolidation_events))
