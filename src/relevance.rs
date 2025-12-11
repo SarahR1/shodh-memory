@@ -316,7 +316,8 @@ impl RelevanceEngine {
 
             for (memory, score, matched) in entity_matches {
                 let id = memory.id.0;
-                candidate_memories.insert(id, (memory, score, RelevanceReason::EntityMatch, matched));
+                candidate_memories
+                    .insert(id, (memory, score, RelevanceReason::EntityMatch, matched));
             }
         }
 
@@ -329,14 +330,20 @@ impl RelevanceEngine {
 
             for (memory, score) in semantic_matches {
                 let id = memory.id.0;
-                if let Some((_, existing_score, reason, _matched)) = candidate_memories.get_mut(&id) {
+                if let Some((_, existing_score, reason, _matched)) = candidate_memories.get_mut(&id)
+                {
                     // Already found via entity match - combine scores
                     *existing_score = (*existing_score + score) / 2.0;
                     *reason = RelevanceReason::Combined;
                 } else {
                     candidate_memories.insert(
                         id,
-                        (memory, score, RelevanceReason::SemanticSimilarity, Vec::new()),
+                        (
+                            memory,
+                            score,
+                            RelevanceReason::SemanticSimilarity,
+                            Vec::new(),
+                        ),
                     );
                 }
             }
@@ -357,7 +364,11 @@ impl RelevanceEngine {
                 // Apply memory type filter
                 if !config.memory_types.is_empty() {
                     let mem_type = format!("{:?}", memory.experience.experience_type);
-                    if !config.memory_types.iter().any(|t| t.eq_ignore_ascii_case(&mem_type)) {
+                    if !config
+                        .memory_types
+                        .iter()
+                        .any(|t| t.eq_ignore_ascii_case(&mem_type))
+                    {
                         return None;
                     }
                 }
@@ -591,7 +602,10 @@ impl RelevanceEngine {
                                 for shared_memory in &all_memories {
                                     let id_str = shared_memory.id.0.to_string();
                                     if !found_ids_str.contains(&id_str)
-                                        && shared_memory.experience.content.contains(&episode.content)
+                                        && shared_memory
+                                            .experience
+                                            .content
+                                            .contains(&episode.content)
                                     {
                                         graph_results.push((
                                             (**shared_memory).clone(),
@@ -659,10 +673,8 @@ impl RelevanceEngine {
             }
             Err(_) => {
                 // Fallback: simple keyword matching (less accurate but fast)
-                let context_words: HashSet<&str> = context
-                    .split_whitespace()
-                    .filter(|w| w.len() > 3)
-                    .collect();
+                let context_words: HashSet<&str> =
+                    context.split_whitespace().filter(|w| w.len() > 3).collect();
 
                 let all_memories = memory_system.get_all_memories()?;
                 for shared_memory in all_memories {
@@ -969,9 +981,9 @@ mod tests {
 
     #[test]
     fn test_recency_boost() {
-        let engine = RelevanceEngine::new(Arc::new(
-            crate::embeddings::NeuralNer::new_fallback(crate::embeddings::NerConfig::default()),
-        ));
+        let engine = RelevanceEngine::new(Arc::new(crate::embeddings::NeuralNer::new_fallback(
+            crate::embeddings::NerConfig::default(),
+        )));
 
         // Recent memory should get boost
         let recent = Utc::now();
@@ -986,9 +998,9 @@ mod tests {
 
     #[test]
     fn test_entity_type_weight() {
-        let engine = RelevanceEngine::new(Arc::new(
-            crate::embeddings::NeuralNer::new_fallback(crate::embeddings::NerConfig::default()),
-        ));
+        let engine = RelevanceEngine::new(Arc::new(crate::embeddings::NeuralNer::new_fallback(
+            crate::embeddings::NerConfig::default(),
+        )));
 
         assert_eq!(engine.entity_type_weight("Person"), 1.0);
         assert_eq!(engine.entity_type_weight("organization"), 0.9);
