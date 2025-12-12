@@ -594,6 +594,37 @@ impl Default for MemoryTier {
     }
 }
 
+/// Type of change made to a memory
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeType {
+    /// Memory was created
+    Created,
+    /// Content was updated
+    ContentUpdated,
+    /// Status/state changed (e.g., Linear issue status)
+    StatusChanged,
+    /// Tags/entities were modified
+    TagsUpdated,
+    /// Importance was adjusted
+    ImportanceAdjusted,
+}
+
+/// A revision in memory history - tracks what changed and when
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryRevision {
+    /// Previous content before this change
+    pub previous_content: String,
+    /// What type of change occurred
+    pub change_type: ChangeType,
+    /// When the change happened
+    pub changed_at: DateTime<Utc>,
+    /// Optional: who/what triggered the change
+    pub changed_by: Option<String>,
+    /// Optional: brief description of change
+    pub change_reason: Option<String>,
+}
+
 /// Stored memory with metadata
 ///
 /// This is the UNIFIED memory kernel - the single source of truth.
@@ -641,6 +672,22 @@ pub struct Memory {
 
     // Similarity score (only populated in search results, not stored)
     pub score: Option<f32>,
+
+    // ==========================================================================
+    // External linking - enables upsert from external sources (Linear, GitHub, etc.)
+    // ==========================================================================
+    /// External identifier for linking to external systems
+    /// Format: "{source}:{id}" e.g. "linear:SHO-39", "github:pr-123"
+    /// When set, enables upsert semantics: same external_id = update existing memory
+    pub external_id: Option<String>,
+
+    /// Version counter - incremented on each update (starts at 1)
+    pub version: u32,
+
+    /// Audit history - tracks all changes to this memory
+    /// Only populated for memories with external_id (mutable memories)
+    /// Empty for regular immutable memories
+    pub history: Vec<MemoryRevision>,
 }
 
 impl Clone for Memory {
@@ -661,6 +708,9 @@ impl Clone for Memory {
             run_id: self.run_id.clone(),
             actor_id: self.actor_id.clone(),
             score: self.score,
+            external_id: self.external_id.clone(),
+            version: self.version,
+            history: self.history.clone(),
         }
     }
 }
@@ -697,7 +747,61 @@ impl Memory {
             run_id,
             actor_id,
             score: None,
+            // External linking - defaults to None (immutable memory)
+            external_id: None,
+            version: 1,
+            history: Vec::new(),
         }
+    }
+
+    /// Create a new memory linked to an external system (enables upsert)
+    pub fn new_with_external_id(
+        id: MemoryId,
+        experience: Experience,
+        importance: f32,
+        external_id: String,
+        agent_id: Option<String>,
+        run_id: Option<String>,
+        actor_id: Option<String>,
+    ) -> Self {
+        let mut memory = Self::new(id, experience, importance, agent_id, run_id, actor_id);
+        memory.external_id = Some(external_id);
+        memory
+    }
+
+    /// Update this memory's content, pushing old content to history
+    /// Returns the new version number
+    pub fn update_content(
+        &mut self,
+        new_content: String,
+        change_type: ChangeType,
+        changed_by: Option<String>,
+        change_reason: Option<String>,
+    ) -> u32 {
+        // Push current content to history
+        self.history.push(MemoryRevision {
+            previous_content: self.experience.content.clone(),
+            change_type,
+            changed_at: Utc::now(),
+            changed_by,
+            change_reason,
+        });
+
+        // Update content
+        self.experience.content = new_content;
+        self.version += 1;
+
+        self.version
+    }
+
+    /// Get the full history of this memory
+    pub fn get_history(&self) -> &[MemoryRevision] {
+        &self.history
+    }
+
+    /// Check if this memory has been updated (version > 1)
+    pub fn has_history(&self) -> bool {
+        self.version > 1
     }
 
     /// Add entity reference (bidirectional link to graph)
@@ -743,6 +847,16 @@ impl Memory {
             MemoryTier::LongTerm => MemoryTier::Archive,
             MemoryTier::Archive => MemoryTier::Archive, // Already at max
         };
+    }
+
+    /// Set the similarity score (used in search results)
+    pub fn set_score(&mut self, score: f32) {
+        self.score = Some(score);
+    }
+
+    /// Get the similarity score (only populated in search results)
+    pub fn get_score(&self) -> Option<f32> {
+        self.score
     }
 
     /// Demote to previous tier (for decay)
@@ -947,6 +1061,10 @@ struct MemoryFlat {
     actor_id: Option<String>,
     temporal_relevance: f32,
     score: Option<f32>,
+    // External linking (mutable memories)
+    external_id: Option<String>,
+    version: u32,
+    history: Vec<MemoryRevision>,
 }
 
 impl Serialize for Memory {
@@ -975,6 +1093,10 @@ impl Serialize for Memory {
             actor_id: self.actor_id.clone(),
             temporal_relevance: meta.temporal_relevance,
             score: self.score,
+            // External linking (mutable memories)
+            external_id: self.external_id.clone(),
+            version: self.version,
+            history: self.history.clone(),
         };
         flat.serialize(serializer)
     }
@@ -1008,6 +1130,10 @@ impl<'de> Deserialize<'de> for Memory {
             run_id: flat.run_id,
             actor_id: flat.actor_id,
             score: flat.score,
+            // External linking (mutable memories)
+            external_id: flat.external_id,
+            version: flat.version,
+            history: flat.history,
         })
     }
 }
@@ -1970,6 +2096,24 @@ pub struct MemoryStats {
     pub promotions_to_longterm: usize,
     pub total_retrievals: usize,
     pub average_importance: f32,
+}
+
+/// Report from index integrity verification
+///
+/// Used to diagnose vector index gaps where memories are stored in RocksDB
+/// but missing from the vector index (orphaned memories).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IndexIntegrityReport {
+    /// Total memories in RocksDB storage
+    pub total_storage: usize,
+    /// Total memories in vector index
+    pub total_indexed: usize,
+    /// Number of orphaned memories (storage - indexed)
+    pub orphaned_count: usize,
+    /// First 100 orphaned memory IDs for debugging
+    pub orphaned_ids: Vec<MemoryId>,
+    /// Whether the index is healthy (no orphans)
+    pub is_healthy: bool,
 }
 
 /// Retrieval statistics for SHO-26 associative retrieval (debugging/observability)

@@ -176,9 +176,10 @@ impl MemoryStorage {
         let importance_key = format!("importance:{}:{}", importance_bucket, memory.id.0);
         batch.put(importance_key.as_bytes(), b"1");
 
-        // Index by entities
+        // Index by entities (case-insensitive for tag search compatibility)
         for entity in &memory.experience.entities {
-            let entity_key = format!("entity:{}:{}", entity, memory.id.0);
+            let normalized_entity = entity.to_lowercase();
+            let entity_key = format!("entity:{}:{}", normalized_entity, memory.id.0);
             batch.put(entity_key.as_bytes(), b"1");
         }
 
@@ -222,6 +223,16 @@ impl MemoryStorage {
             batch.put(reward_key.as_bytes(), b"1");
         }
 
+        // === External Linking Index ===
+        // Index by external_id for upsert operations (Linear, GitHub, etc.)
+        // Key format: external:{source}:{id}:{memory_id} -> memory_id
+        // Enables O(1) lookup when syncing from external systems
+        if let Some(ref external_id) = memory.external_id {
+            let external_key = format!("external:{}:{}", external_id, memory.id.0);
+            // Store memory_id as value for direct lookup
+            batch.put(external_key.as_bytes(), memory.id.0.as_bytes());
+        }
+
         // Use write mode based on configuration
         let mut write_opts = WriteOptions::default();
         write_opts.set_sync(self.write_mode == WriteMode::Sync);
@@ -242,6 +253,35 @@ impl MemoryStorage {
             }),
             None => Err(anyhow!("Memory not found: {id:?}")),
         }
+    }
+
+    /// Find a memory by its external_id (e.g., "linear:SHO-39", "github:pr-123")
+    ///
+    /// Returns the memory if found, None if no memory with this external_id exists.
+    /// Used for upsert operations when syncing from external sources.
+    pub fn find_by_external_id(&self, external_id: &str) -> Result<Option<Memory>> {
+        // Index key format: external:{external_id}:{memory_id}
+        let prefix = format!("external:{external_id}:");
+
+        let iter = self.index_db.iterator(IteratorMode::From(
+            prefix.as_bytes(),
+            rocksdb::Direction::Forward,
+        ));
+
+        for (key, _value) in iter.flatten() {
+            let key_str = String::from_utf8_lossy(&key);
+            if !key_str.starts_with(&prefix) {
+                break;
+            }
+            // Extract memory_id from key (format: external:{external_id}:{memory_id})
+            if let Some(id_str) = key_str.strip_prefix(&prefix) {
+                if let Ok(uuid) = uuid::Uuid::parse_str(id_str) {
+                    return Ok(Some(self.get(&MemoryId(uuid))?));
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     /// Update an existing memory
@@ -338,6 +378,12 @@ impl MemoryStorage {
             let reward_bucket = ((reward + 1.0) * 10.0) as i32;
             let reward_key = format!("reward:{}:{}", reward_bucket, id.0);
             batch.delete(reward_key.as_bytes());
+        }
+
+        // External linking index
+        if let Some(ref external_id) = memory.external_id {
+            let external_key = format!("external:{}:{}", external_id, id.0);
+            batch.delete(external_key.as_bytes());
         }
 
         // Use write mode based on configuration
@@ -516,7 +562,9 @@ impl MemoryStorage {
 
     fn search_by_entity(&self, entity: &str) -> Result<Vec<MemoryId>> {
         let mut ids = Vec::new();
-        let prefix = format!("entity:{entity}:");
+        // Normalize to lowercase for case-insensitive matching
+        let normalized_entity = entity.to_lowercase();
+        let prefix = format!("entity:{normalized_entity}:");
 
         let iter = self.index_db.iterator(IteratorMode::From(
             prefix.as_bytes(),
@@ -546,7 +594,9 @@ impl MemoryStorage {
         let mut all_ids = HashSet::new();
 
         for tag in tags {
-            let prefix = format!("entity:{tag}:");
+            // Normalize to lowercase for case-insensitive matching
+            let normalized_tag = tag.to_lowercase();
+            let prefix = format!("entity:{normalized_tag}:");
             let iter = self.index_db.iterator(IteratorMode::From(
                 prefix.as_bytes(),
                 rocksdb::Direction::Forward,

@@ -140,7 +140,7 @@ async function isServerAvailable(): Promise<boolean> {
 const server = new Server(
   {
     name: "shodh-memory",
-    version: "0.1.5",
+    version: "0.1.6",
   },
   {
     capabilities: {
@@ -270,6 +270,22 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         },
       },
       {
+        name: "verify_index",
+        description: "Verify vector index integrity - diagnose orphaned memories that are stored but not searchable. Returns health status and count of orphaned memories.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
+        name: "repair_index",
+        description: "Repair vector index by re-indexing orphaned memories. Use this when verify_index shows unhealthy status. Returns count of repaired memories.",
+        inputSchema: {
+          type: "object",
+          properties: {},
+        },
+      },
+      {
         name: "recall_by_tags",
         description: "Search memories by tags. Returns memories matching ANY of the provided tags.",
         inputSchema: {
@@ -360,6 +376,45 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               description: "End of report period (ISO 8601 format). Defaults to now.",
             },
           },
+        },
+      },
+      {
+        name: "proactive_context",
+        description: "Surface relevant memories based on current conversation context. Use this proactively during conversations to retrieve memories that might be relevant to the current discussion without needing an explicit query. The system analyzes entities, semantic similarity, and recency to find contextually appropriate memories.",
+        inputSchema: {
+          type: "object",
+          properties: {
+            context: {
+              type: "string",
+              description: "The current conversation context or topic (e.g., recent messages, current task description)",
+            },
+            semantic_threshold: {
+              type: "number",
+              description: "Minimum semantic similarity (0.0-1.0) for memories to be surfaced (default: 0.65)",
+              default: 0.65,
+            },
+            entity_match_weight: {
+              type: "number",
+              description: "Weight for entity matching in relevance scoring (0.0-1.0, default: 0.4)",
+              default: 0.4,
+            },
+            recency_weight: {
+              type: "number",
+              description: "Weight for recency boost in relevance scoring (0.0-1.0, default: 0.2)",
+              default: 0.2,
+            },
+            max_results: {
+              type: "number",
+              description: "Maximum number of memories to surface (default: 5)",
+              default: 5,
+            },
+            memory_types: {
+              type: "array",
+              items: { type: "string" },
+              description: "Filter to specific memory types (e.g., ['Decision', 'Learning', 'Context']). Empty means all types.",
+            },
+          },
+          required: ["context"],
         },
       },
     ],
@@ -646,6 +701,82 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
+      case "verify_index": {
+        interface IndexIntegrityReport {
+          total_storage: number;
+          total_indexed: number;
+          orphaned_count: number;
+          orphaned_ids: string[];
+          is_healthy: boolean;
+        }
+
+        const result = await apiCall<IndexIntegrityReport>("/api/index/verify", "POST", {
+          user_id: USER_ID,
+        });
+
+        const statusIcon = result.is_healthy ? "✓" : "⚠";
+        const healthText = result.is_healthy ? "Healthy" : "Unhealthy - orphaned memories detected";
+
+        let response = `Index Integrity Report\n`;
+        response += `━━━━━━━━━━━━━━━━━━━━━━━━━\n`;
+        response += `Status: ${statusIcon} ${healthText}\n`;
+        response += `Total in storage: ${result.total_storage}\n`;
+        response += `Total indexed: ${result.total_indexed}\n`;
+        response += `Orphaned count: ${result.orphaned_count}\n`;
+
+        if (result.orphaned_count > 0) {
+          response += `\nRecommendation: Run repair_index to fix orphaned memories.`;
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: response,
+            },
+          ],
+        };
+      }
+
+      case "repair_index": {
+        interface RepairIndexResponse {
+          success: boolean;
+          total_storage: number;
+          total_indexed: number;
+          repaired: number;
+          failed: number;
+          is_healthy: boolean;
+        }
+
+        const result = await apiCall<RepairIndexResponse>("/api/index/repair", "POST", {
+          user_id: USER_ID,
+        });
+
+        const statusIcon = result.is_healthy ? "✓" : "⚠";
+
+        let response = `Index Repair Results\n`;
+        response += `━━━━━━━━━━━━━━━━━━━━━\n`;
+        response += `Status: ${statusIcon} ${result.success ? "Success" : "Partial success"}\n`;
+        response += `Total in storage: ${result.total_storage}\n`;
+        response += `Total indexed: ${result.total_indexed}\n`;
+        response += `Repaired: ${result.repaired}\n`;
+        response += `Failed: ${result.failed}\n`;
+        response += `Index healthy: ${result.is_healthy ? "Yes" : "No"}\n`;
+
+        if (result.failed > 0) {
+          response += `\nNote: ${result.failed} memories could not be repaired (embedding generation failed).`;
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: response,
+            },
+          ],
+        };
+      }
+
       case "recall_by_tags": {
         const { tags, limit = 20 } = args as { tags: string[]; limit?: number };
 
@@ -757,6 +888,126 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             {
               type: "text",
               text: `Deleted ${result.deleted_count} memories between ${start} and ${end}`,
+            },
+          ],
+        };
+      }
+
+      case "proactive_context": {
+        const {
+          context,
+          semantic_threshold = 0.65,
+          entity_match_weight = 0.4,
+          recency_weight = 0.2,
+          max_results = 5,
+          memory_types = [],
+        } = args as {
+          context: string;
+          semantic_threshold?: number;
+          entity_match_weight?: number;
+          recency_weight?: number;
+          max_results?: number;
+          memory_types?: string[];
+        };
+
+        interface DetectedEntity {
+          text: string;
+          entity_type: string;
+          confidence: number;
+          matched_memories: number;
+        }
+
+        interface SurfacedMemory {
+          id: string;
+          content: string;
+          memory_type: string;
+          importance: number;
+          relevance_score: number;
+          relevance_reason: string;
+          matched_entities: string[];
+          semantic_similarity: number;
+          created_at: string;
+          tags: string[];
+        }
+
+        interface RelevanceResponse {
+          memories: SurfacedMemory[];
+          detected_entities: DetectedEntity[];
+          latency_ms: number;
+          config_used: {
+            semantic_threshold: number;
+            entity_match_weight: number;
+            semantic_weight: number;
+            recency_weight: number;
+            max_results: number;
+            recency_half_life_hours: number;
+            memory_types: string[];
+          };
+        }
+
+        const result = await apiCall<RelevanceResponse>("/api/relevant", "POST", {
+          user_id: USER_ID,
+          context,
+          config: {
+            semantic_threshold,
+            entity_match_weight,
+            semantic_weight: 1.0 - entity_match_weight - recency_weight,
+            recency_weight,
+            max_results,
+            memory_types,
+          },
+        });
+
+        const memories = result.memories || [];
+        const entities = result.detected_entities || [];
+
+        if (memories.length === 0) {
+          // No relevant memories, but show detected entities if any
+          if (entities.length > 0) {
+            const entityList = entities
+              .map(e => `  - "${e.text}" (${e.entity_type}, ${(e.confidence * 100).toFixed(0)}% confidence)`)
+              .join('\n');
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `No relevant memories surfaced for this context.\n\nDetected entities:\n${entityList}\n\n[Latency: ${result.latency_ms.toFixed(1)}ms]`,
+                },
+              ],
+            };
+          }
+          return {
+            content: [
+              {
+                type: "text",
+                text: `No relevant memories surfaced for this context.\n\n[Latency: ${result.latency_ms.toFixed(1)}ms]`,
+              },
+            ],
+          };
+        }
+
+        // Format surfaced memories
+        const formatted = memories
+          .map((m, i) => {
+            const score = (m.relevance_score * 100).toFixed(0);
+            const entityMatchStr = (m.matched_entities && m.matched_entities.length > 0)
+              ? `\n   Entity matches: ${m.matched_entities.join(', ')}`
+              : '';
+            const semScore = (m.semantic_similarity * 100).toFixed(0);
+            return `${i + 1}. [${score}% relevant] ${m.content.slice(0, 100)}${m.content.length > 100 ? '...' : ''}\n   Type: ${m.memory_type} | semantic=${semScore}% | reason: ${m.relevance_reason}${entityMatchStr}`;
+          })
+          .join("\n\n");
+
+        // Format detected entities summary
+        const entitySummary = entities.length > 0
+          ? `\n\nDetected entities: ${entities.map(e => `"${e.text}" (${e.entity_type})`).join(', ')}`
+          : '';
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Surfaced ${memories.length} relevant memories:\n\n${formatted}${entitySummary}\n\n[Latency: ${result.latency_ms.toFixed(1)}ms | Threshold: ${(semantic_threshold * 100).toFixed(0)}%]`,
             },
           ],
         };
@@ -979,7 +1230,7 @@ server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Shodh-Memory MCP server v0.1.5 running");
+  console.error("Shodh-Memory MCP server v0.1.6 running");
   console.error(`Connecting to: ${API_URL}`);
   console.error(`User ID: ${USER_ID}`);
 }

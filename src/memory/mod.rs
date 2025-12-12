@@ -1351,6 +1351,105 @@ impl MemorySystem {
         self.retriever.rebuild_index()
     }
 
+    /// Repair vector index by finding and re-indexing orphaned memories
+    ///
+    /// Orphaned memories are those stored in RocksDB but missing from the vector index.
+    /// This can happen if embedding generation fails during record().
+    ///
+    /// Returns: (total_storage, indexed, repaired, failed)
+    pub fn repair_vector_index(&self) -> Result<(usize, usize, usize, usize)> {
+        let all_memories = self.long_term_memory.get_all()?;
+        let total_storage = all_memories.len();
+        let indexed_before = self.retriever.len();
+
+        let mut repaired = 0;
+        let mut failed = 0;
+
+        // Get set of indexed memory IDs
+        let indexed_ids = self.retriever.get_indexed_memory_ids();
+
+        for memory in all_memories {
+            // Check if memory is already indexed
+            if indexed_ids.contains(&memory.id) {
+                continue;
+            }
+
+            // Memory is orphaned - try to index it
+            tracing::info!(
+                memory_id = %memory.id.0,
+                content_preview = %memory.experience.content.chars().take(50).collect::<String>(),
+                "Repairing orphaned memory"
+            );
+
+            match self.retriever.index_memory(&memory) {
+                Ok(_) => {
+                    repaired += 1;
+                    tracing::info!(memory_id = %memory.id.0, "Successfully repaired orphaned memory");
+                }
+                Err(e) => {
+                    failed += 1;
+                    tracing::error!(
+                        memory_id = %memory.id.0,
+                        error = %e,
+                        "Failed to repair orphaned memory - embedding generation failed"
+                    );
+                }
+            }
+        }
+
+        let indexed_after = self.retriever.len();
+
+        // Update stats
+        {
+            let mut stats = self.stats.write();
+            stats.vector_index_count = indexed_after;
+        }
+
+        tracing::info!(
+            total_storage = total_storage,
+            indexed_before = indexed_before,
+            indexed_after = indexed_after,
+            repaired = repaired,
+            failed = failed,
+            "Vector index repair completed"
+        );
+
+        Ok((total_storage, indexed_after, repaired, failed))
+    }
+
+    /// Verify index integrity and return diagnostic information
+    ///
+    /// Returns a struct with:
+    /// - total_storage: memories in RocksDB
+    /// - total_indexed: memories in vector index
+    /// - orphaned_count: memories missing from index
+    /// - orphaned_ids: list of orphaned memory IDs (first 100)
+    pub fn verify_index_integrity(&self) -> Result<IndexIntegrityReport> {
+        let all_memories = self.long_term_memory.get_all()?;
+        let total_storage = all_memories.len();
+        let indexed_ids = self.retriever.get_indexed_memory_ids();
+        let total_indexed = indexed_ids.len();
+
+        let mut orphaned_ids = Vec::new();
+        for memory in &all_memories {
+            if !indexed_ids.contains(&memory.id) {
+                if orphaned_ids.len() < 100 {
+                    orphaned_ids.push(memory.id.clone());
+                }
+            }
+        }
+
+        let orphaned_count = total_storage.saturating_sub(total_indexed);
+
+        Ok(IndexIntegrityReport {
+            total_storage,
+            total_indexed,
+            orphaned_count,
+            orphaned_ids,
+            is_healthy: orphaned_count == 0,
+        })
+    }
+
     /// Save vector index to disk (shutdown persistence)
     pub fn save_vector_index(&self, path: &Path) -> Result<()> {
         self.retriever.save_index(path)
@@ -1577,6 +1676,203 @@ impl MemorySystem {
     /// Get memory graph statistics
     pub fn graph_stats(&self) -> MemoryGraphStats {
         self.retriever.graph_stats()
+    }
+
+    // =========================================================================
+    // UPSERT: Mutable memories with external linking and audit history
+    // =========================================================================
+
+    /// Upsert a memory: create if new, update with history tracking if exists
+    ///
+    /// When a memory with the same external_id exists:
+    /// 1. Old content is pushed to history (audit trail)
+    /// 2. Content is updated with new content
+    /// 3. Version is incremented
+    /// 4. Embeddings are regenerated for new content
+    /// 5. Vector index is updated
+    ///
+    /// # Arguments
+    /// * `external_id` - External system identifier (e.g., "linear:SHO-39", "github:pr-123")
+    /// * `experience` - The experience data to store
+    /// * `change_type` - Type of change (ContentUpdated, StatusChanged, etc.)
+    /// * `changed_by` - Optional: who/what triggered the change
+    /// * `change_reason` - Optional: description of why this changed
+    ///
+    /// # Returns
+    /// * `(MemoryId, bool)` - Memory ID and whether it was an update (true) or create (false)
+    pub fn upsert(
+        &self,
+        external_id: String,
+        mut experience: Experience,
+        change_type: ChangeType,
+        changed_by: Option<String>,
+        change_reason: Option<String>,
+    ) -> Result<(MemoryId, bool)> {
+        // Check resource limits
+        self.check_resource_limits()?;
+
+        // Try to find existing memory with this external_id
+        if let Some(mut existing) = self.long_term_memory.find_by_external_id(&external_id)? {
+            // === UPDATE PATH ===
+            let memory_id = existing.id.clone();
+
+            // Push old content to history and update
+            existing.update_content(
+                experience.content.clone(),
+                change_type,
+                changed_by,
+                change_reason,
+            );
+
+            // Update entities if provided
+            if !experience.entities.is_empty() {
+                existing.experience.entities = experience.entities;
+            }
+
+            // Update tags if provided
+            if !experience.tags.is_empty() {
+                existing.experience.tags = experience.tags;
+            }
+
+            // Regenerate embeddings for new content
+            let content_hash = Self::sha256_hash(&existing.experience.content);
+            if let Some(cached_embedding) = self.content_cache.get(&content_hash) {
+                existing.experience.embeddings = Some(cached_embedding.clone());
+            } else {
+                match self.embedder.encode(&existing.experience.content) {
+                    Ok(embedding) => {
+                        self.content_cache.insert(content_hash, embedding.clone());
+                        existing.experience.embeddings = Some(embedding);
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to regenerate embedding during upsert: {}", e);
+                    }
+                }
+            }
+
+            // Persist updated memory
+            self.long_term_memory.update(&existing)?;
+
+            // Re-index in vector DB with new embeddings
+            if let Err(e) = self.retriever.reindex_memory(&existing) {
+                tracing::warn!(
+                    "Failed to reindex memory {} in vector DB: {}",
+                    memory_id.0,
+                    e
+                );
+            }
+
+            // Update in working/session memory if cached
+            {
+                let mut working = self.working_memory.write();
+                if working.contains(&memory_id) {
+                    working.remove(&memory_id)?;
+                    working.add_shared(Arc::new(existing.clone()))?;
+                }
+            }
+            {
+                let mut session = self.session_memory.write();
+                if session.contains(&memory_id) {
+                    session.remove(&memory_id)?;
+                    session.add_shared(Arc::new(existing.clone()))?;
+                }
+            }
+
+            tracing::info!(
+                external_id = %external_id,
+                memory_id = %memory_id.0,
+                version = existing.version,
+                "Memory upserted (update)"
+            );
+
+            Ok((memory_id, true))
+        } else {
+            // === CREATE PATH ===
+            let memory_id = MemoryId(Uuid::new_v4());
+            let importance = self.calculate_importance(&experience);
+
+            // Generate embeddings if not provided
+            if experience.embeddings.is_none() {
+                let content_hash = Self::sha256_hash(&experience.content);
+                if let Some(cached_embedding) = self.content_cache.get(&content_hash) {
+                    experience.embeddings = Some(cached_embedding.clone());
+                } else {
+                    match self.embedder.encode(&experience.content) {
+                        Ok(embedding) => {
+                            self.content_cache.insert(content_hash, embedding.clone());
+                            experience.embeddings = Some(embedding);
+                        }
+                        Err(e) => {
+                            tracing::warn!("Failed to generate embedding: {}", e);
+                        }
+                    }
+                }
+            }
+
+            // Create memory with external_id
+            let memory = Arc::new(Memory::new_with_external_id(
+                memory_id.clone(),
+                experience,
+                importance,
+                external_id.clone(),
+                None, // agent_id
+                None, // run_id
+                None, // actor_id
+            ));
+
+            // Persist to storage
+            self.long_term_memory.store(&memory)?;
+
+            // Log creation
+            self.logger.write().log_created(&memory, "working");
+
+            // Add to working memory
+            self.working_memory
+                .write()
+                .add_shared(Arc::clone(&memory))?;
+
+            // Index in vector DB
+            if let Err(e) = self.retriever.index_memory(&memory) {
+                tracing::warn!("Failed to index memory {} in vector DB: {}", memory.id.0, e);
+            }
+
+            // Add to knowledge graph
+            self.retriever.add_to_graph(&memory);
+
+            // Add to session if important
+            if importance > self.config.importance_threshold {
+                self.session_memory
+                    .write()
+                    .add_shared(Arc::clone(&memory))?;
+            }
+
+            // Update stats
+            self.stats.write().total_memories += 1;
+
+            tracing::info!(
+                external_id = %external_id,
+                memory_id = %memory_id.0,
+                "Memory upserted (create)"
+            );
+
+            Ok((memory_id, false))
+        }
+    }
+
+    /// Get the history of a memory (audit trail of changes)
+    ///
+    /// Returns the full revision history for memories with external linking.
+    /// Returns empty vec for regular (non-mutable) memories.
+    pub fn get_memory_history(&self, memory_id: &MemoryId) -> Result<Vec<MemoryRevision>> {
+        let memory = self.long_term_memory.get(memory_id)?;
+        Ok(memory.history.clone())
+    }
+
+    /// Find a memory by external ID
+    ///
+    /// Used to check if a memory already exists for an external entity
+    pub fn find_by_external_id(&self, external_id: &str) -> Result<Option<Memory>> {
+        self.long_term_memory.find_by_external_id(external_id)
     }
 
     /// Run periodic maintenance (consolidation, activation decay, graph maintenance)

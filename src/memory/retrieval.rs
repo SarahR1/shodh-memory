@@ -206,6 +206,16 @@ impl RetrievalEngine {
         self.len() == 0
     }
 
+    /// Get set of all indexed memory IDs (for integrity checking)
+    pub fn get_indexed_memory_ids(&self) -> HashSet<MemoryId> {
+        self.id_mapping
+            .read()
+            .memory_to_vector
+            .keys()
+            .cloned()
+            .collect()
+    }
+
     /// Add memory to vector index (call when storing new memory)
     pub fn index_memory(&self, memory: &Memory) -> Result<()> {
         // Use pre-computed embedding if available, otherwise generate
@@ -229,6 +239,32 @@ impl RetrievalEngine {
         self.id_mapping.write().insert(memory.id.clone(), vector_id);
 
         Ok(())
+    }
+
+    /// Re-index an existing memory with updated embeddings
+    ///
+    /// Used when memory content is updated via upsert() to ensure the vector
+    /// index reflects the new content.
+    ///
+    /// Strategy: Remove old vector and add new one (Vamana doesn't support update-in-place)
+    pub fn reindex_memory(&self, memory: &Memory) -> Result<()> {
+        // Check if memory is already indexed
+        let existing_vector_id = {
+            let mapping = self.id_mapping.read();
+            mapping.memory_to_vector.get(&memory.id).copied()
+        };
+
+        if let Some(vector_id) = existing_vector_id {
+            // Remove old mapping (vector stays in index but becomes orphaned - acceptable for HNSW)
+            // Note: Vamana/HNSW doesn't support true deletion, but this is fine for upsert scenarios
+            // The old vector will be ignored during search since ID mapping points to new vector
+            let mut mapping = self.id_mapping.write();
+            mapping.memory_to_vector.remove(&memory.id);
+            mapping.vector_to_memory.remove(&vector_id);
+        }
+
+        // Add with new embedding
+        self.index_memory(memory)
     }
 
     /// Extract searchable text from memory

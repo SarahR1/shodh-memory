@@ -931,6 +931,10 @@ struct RememberRequest {
     /// Accept both "experience_type" and "memory_type" as field names
     #[serde(default, alias = "memory_type")]
     experience_type: Option<String>,
+    /// External ID for linking to external systems (e.g., "linear:SHO-39", "github:pr-123")
+    /// When provided with upsert, existing memory with same external_id will be updated
+    #[serde(default)]
+    external_id: Option<String>,
 }
 
 /// Simplified remember response
@@ -976,9 +980,21 @@ struct RecallResponse {
 #[derive(Debug, Serialize)]
 struct RecallMemory {
     id: String,
-    content: String,
+    /// Nested experience for MCP compatibility
+    experience: RecallExperience,
     importance: f32,
     created_at: String,
+    /// Similarity/relevance score (0.0-1.0)
+    score: f32,
+}
+
+#[derive(Debug, Serialize)]
+struct RecallExperience {
+    content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    experience_type: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    tags: Vec<String>,
 }
 
 /// Batch remember request for bulk inserts
@@ -1002,6 +1018,68 @@ struct BatchRememberResponse {
     ids: Vec<String>,
     success_count: usize,
     error_count: usize,
+}
+
+/// Upsert request - create or update memory with external linking
+#[derive(Debug, Deserialize)]
+struct UpsertRequest {
+    user_id: String,
+    /// External ID is REQUIRED for upsert (e.g., "linear:SHO-39", "github:pr-123")
+    external_id: String,
+    content: String,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default, alias = "memory_type")]
+    experience_type: Option<String>,
+    /// Type of change: "content_updated", "status_changed", "tags_updated", "importance_adjusted"
+    #[serde(default = "default_change_type")]
+    change_type: String,
+    /// Who/what triggered this change
+    #[serde(default)]
+    changed_by: Option<String>,
+    /// Description of why this changed
+    #[serde(default)]
+    change_reason: Option<String>,
+}
+
+fn default_change_type() -> String {
+    "content_updated".to_string()
+}
+
+#[derive(Debug, Serialize)]
+struct UpsertResponse {
+    id: String,
+    success: bool,
+    /// True if this was an update, false if it was a create
+    was_update: bool,
+    /// Current version number (starts at 1, increments on update)
+    version: u32,
+}
+
+/// Request to get memory history (audit trail)
+#[derive(Debug, Deserialize)]
+struct MemoryHistoryRequest {
+    user_id: String,
+    memory_id: String,
+}
+
+/// Response with memory revision history
+#[derive(Debug, Serialize)]
+struct MemoryHistoryResponse {
+    memory_id: String,
+    external_id: Option<String>,
+    current_content: String,
+    version: u32,
+    history: Vec<MemoryRevisionInfo>,
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryRevisionInfo {
+    previous_content: String,
+    change_type: String,
+    changed_at: String,
+    changed_by: Option<String>,
+    change_reason: Option<String>,
 }
 
 // =============================================================================
@@ -1633,6 +1711,218 @@ async fn remember(
     }))
 }
 
+/// Upsert memory - create new or update existing memory with history tracking (SHO-39)
+///
+/// This endpoint is designed for syncing from external systems (Linear, GitHub, etc.)
+/// where the same entity may need to be updated multiple times.
+///
+/// Behavior:
+/// - If no memory with the external_id exists: Creates new memory
+/// - If memory with external_id exists: Pushes old content to history, updates with new
+///
+/// Example: POST /api/upsert {
+///   "user_id": "agent-1",
+///   "external_id": "linear:SHO-39",
+///   "content": "Unified streaming ingest infrastructure: DONE",
+///   "change_type": "status_changed",
+///   "changed_by": "linear-webhook",
+///   "change_reason": "Issue status changed from In Progress to Done"
+/// }
+#[tracing::instrument(skip(state), fields(user_id = %req.user_id, external_id = %req.external_id))]
+async fn upsert_memory(
+    State(state): State<AppState>,
+    Json(req): Json<UpsertRequest>,
+) -> Result<Json<UpsertResponse>, AppError> {
+    let op_start = std::time::Instant::now();
+
+    validation::validate_user_id(&req.user_id).map_validation_err("user_id")?;
+    validation::validate_content(&req.content, false).map_validation_err("content")?;
+
+    // Validate external_id (required for upsert)
+    if req.external_id.is_empty() {
+        return Err(AppError::InvalidInput {
+            field: "external_id".to_string(),
+            reason: "external_id is required for upsert".to_string(),
+        });
+    }
+
+    // Parse experience type
+    let experience_type = req
+        .experience_type
+        .as_ref()
+        .and_then(|s| match s.to_lowercase().as_str() {
+            "task" => Some(ExperienceType::Task),
+            "learning" => Some(ExperienceType::Learning),
+            "decision" => Some(ExperienceType::Decision),
+            "error" => Some(ExperienceType::Error),
+            "pattern" => Some(ExperienceType::Pattern),
+            "conversation" => Some(ExperienceType::Conversation),
+            "discovery" => Some(ExperienceType::Discovery),
+            _ => None,
+        })
+        .unwrap_or(ExperienceType::Context);
+
+    // Parse change type
+    let change_type = match req.change_type.to_lowercase().as_str() {
+        "created" => memory::types::ChangeType::Created,
+        "content_updated" => memory::types::ChangeType::ContentUpdated,
+        "status_changed" => memory::types::ChangeType::StatusChanged,
+        "tags_updated" => memory::types::ChangeType::TagsUpdated,
+        "importance_adjusted" => memory::types::ChangeType::ImportanceAdjusted,
+        _ => memory::types::ChangeType::ContentUpdated,
+    };
+
+    // Extract entities from content using Neural NER and merge with user-provided tags
+    let extracted_names: Vec<String> = match state.neural_ner.extract(&req.content) {
+        Ok(entities) => entities.into_iter().map(|e| e.text).collect(),
+        Err(e) => {
+            tracing::debug!("NER extraction failed in upsert: {}", e);
+            Vec::new()
+        }
+    };
+
+    // Merge user tags with NER-extracted entities (deduplicated)
+    let mut merged_entities: Vec<String> = req.tags.clone();
+    for entity_name in extracted_names {
+        if !merged_entities
+            .iter()
+            .any(|t| t.eq_ignore_ascii_case(&entity_name))
+        {
+            merged_entities.push(entity_name);
+        }
+    }
+
+    // Create Experience
+    let experience = Experience {
+        content: req.content.clone(),
+        experience_type,
+        entities: merged_entities,
+        ..Default::default()
+    };
+
+    let memory_system = state
+        .get_user_memory(&req.user_id)
+        .map_err(AppError::Internal)?;
+
+    let external_id = req.external_id.clone();
+    let changed_by = req.changed_by.clone();
+    let change_reason = req.change_reason.clone();
+
+    // Perform upsert
+    let (memory_id, was_update) = {
+        let memory = memory_system.clone();
+        let exp = experience.clone();
+        tokio::task::spawn_blocking(move || {
+            let memory_guard = memory.read();
+            memory_guard.upsert(external_id, exp, change_type, changed_by, change_reason)
+        })
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
+        .map_err(AppError::Internal)?
+    };
+
+    // Get the version from the stored memory
+    let version = {
+        let memory = memory_system.clone();
+        let mid = memory_id.clone();
+        tokio::task::spawn_blocking(move || {
+            let memory_guard = memory.read();
+            memory_guard
+                .get_memory(&mid)
+                .map(|m| m.version)
+                .unwrap_or(1)
+        })
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
+    };
+
+    // Process into graph if this was a create (not update)
+    if !was_update {
+        if let Err(e) = state.process_experience_into_graph(&req.user_id, &experience, &memory_id) {
+            tracing::debug!("Graph processing failed for memory {}: {}", memory_id.0, e);
+        }
+    }
+
+    // Record metrics
+    let duration = op_start.elapsed().as_secs_f64();
+    metrics::MEMORY_STORE_DURATION.observe(duration);
+    metrics::MEMORY_STORE_TOTAL
+        .with_label_values(&[if was_update {
+            "upsert_update"
+        } else {
+            "upsert_create"
+        }])
+        .inc();
+
+    Ok(Json(UpsertResponse {
+        id: memory_id.0.to_string(),
+        success: true,
+        was_update,
+        version,
+    }))
+}
+
+/// Get memory history (audit trail) - SHO-39
+///
+/// Returns the revision history for a memory, showing how it evolved over time.
+/// Useful for understanding context of how external entities changed.
+///
+/// Example: POST /api/memory/history {
+///   "user_id": "agent-1",
+///   "memory_id": "uuid-here"
+/// }
+#[tracing::instrument(skip(state), fields(user_id = %req.user_id, memory_id = %req.memory_id))]
+async fn get_memory_history(
+    State(state): State<AppState>,
+    Json(req): Json<MemoryHistoryRequest>,
+) -> Result<Json<MemoryHistoryResponse>, AppError> {
+    validation::validate_user_id(&req.user_id).map_validation_err("user_id")?;
+
+    // Parse memory ID
+    let memory_id = uuid::Uuid::parse_str(&req.memory_id)
+        .map_err(|e| AppError::InvalidMemoryId(format!("Invalid UUID: {e}")))
+        .map(memory::types::MemoryId)?;
+
+    let memory_system = state
+        .get_user_memory(&req.user_id)
+        .map_err(AppError::Internal)?;
+
+    // Get memory and its history
+    let (memory, history) = {
+        let memory = memory_system.clone();
+        let mid = memory_id.clone();
+        tokio::task::spawn_blocking(move || {
+            let memory_guard = memory.read();
+            let mem = memory_guard.get_memory(&mid)?;
+            let hist = mem.history.clone();
+            Ok::<_, anyhow::Error>((mem, hist))
+        })
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
+        .map_err(AppError::Internal)?
+    };
+
+    // Convert history to response format
+    let history_info: Vec<MemoryRevisionInfo> = history
+        .into_iter()
+        .map(|rev| MemoryRevisionInfo {
+            previous_content: rev.previous_content,
+            change_type: format!("{:?}", rev.change_type).to_lowercase(),
+            changed_at: rev.changed_at.to_rfc3339(),
+            changed_by: rev.changed_by,
+            change_reason: rev.change_reason,
+        })
+        .collect();
+
+    Ok(Json(MemoryHistoryResponse {
+        memory_id: memory.id.0.to_string(),
+        external_id: memory.external_id,
+        current_content: memory.experience.content,
+        version: memory.version,
+        history: history_info,
+    }))
+}
+
 /// LLM-friendly /api/recall - hybrid retrieval combining semantic search + graph spreading activation
 /// Example: POST /api/recall { "user_id": "agent-1", "query": "What does user like?" }
 ///
@@ -1687,13 +1977,27 @@ async fn recall(
             .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
         };
 
+        let total = semantic_memories.len();
         let recall_memories: Vec<RecallMemory> = semantic_memories
             .into_iter()
-            .map(|m| RecallMemory {
-                id: m.id.0.to_string(),
-                content: m.experience.content.clone(),
-                importance: m.importance(),
-                created_at: m.created_at.to_rfc3339(),
+            .enumerate()
+            .map(|(rank, m)| {
+                // Score based on rank position and salience
+                // Higher rank = higher score, combined with memory salience
+                let rank_score = 1.0 - (rank as f32 / total.max(1) as f32);
+                let salience = m.salience_score_with_access();
+                let score = rank_score * 0.7 + salience * 0.3;
+                RecallMemory {
+                    id: m.id.0.to_string(),
+                    experience: RecallExperience {
+                        content: m.experience.content.clone(),
+                        experience_type: Some(format!("{:?}", m.experience.experience_type)),
+                        tags: m.experience.entities.clone(),
+                    },
+                    importance: m.importance(),
+                    created_at: m.created_at.to_rfc3339(),
+                    score,
+                }
             })
             .collect();
 
@@ -1861,14 +2165,19 @@ async fn recall(
         "Retrieval completed"
     );
 
-    // Convert to response format
+    // Convert to response format - use the pre-computed hybrid score
     let recall_memories: Vec<RecallMemory> = final_results
         .into_iter()
-        .map(|(_, m)| RecallMemory {
+        .map(|(hybrid_score, m)| RecallMemory {
             id: m.id.0.to_string(),
-            content: m.experience.content.clone(),
+            experience: RecallExperience {
+                content: m.experience.content.clone(),
+                experience_type: Some(format!("{:?}", m.experience.experience_type)),
+                tags: m.experience.entities.clone(),
+            },
             importance: m.importance(),
             created_at: m.created_at.to_rfc3339(),
+            score: hybrid_score,
         })
         .collect();
 
@@ -2549,13 +2858,26 @@ async fn retrieve_tracked(
     let tracking_id = uuid::Uuid::new_v4().to_string();
 
     // Convert to response format
+    let total = memories.len();
     let recall_memories: Vec<RecallMemory> = memories
         .into_iter()
-        .map(|m| RecallMemory {
-            id: m.id.0.to_string(),
-            content: m.experience.content.clone(),
-            importance: m.importance(),
-            created_at: m.created_at.to_rfc3339(),
+        .enumerate()
+        .map(|(rank, m)| {
+            // Score based on rank position and salience
+            let rank_score = 1.0 - (rank as f32 / total.max(1) as f32);
+            let salience = m.salience_score_with_access();
+            let score = rank_score * 0.7 + salience * 0.3;
+            RecallMemory {
+                id: m.id.0.to_string(),
+                experience: RecallExperience {
+                    content: m.experience.content.clone(),
+                    experience_type: Some(format!("{:?}", m.experience.experience_type)),
+                    tags: m.experience.entities.clone(),
+                },
+                importance: m.importance(),
+                created_at: m.created_at.to_rfc3339(),
+                score,
+            }
         })
         .collect();
 
@@ -3806,6 +4128,71 @@ async fn get_storage_stats(
         .map_err(AppError::Internal)?;
 
     Ok(Json(stats))
+}
+
+/// Verify vector index integrity - diagnose orphaned memories
+#[derive(Debug, Deserialize)]
+struct VerifyIndexRequest {
+    user_id: String,
+}
+
+async fn verify_index_integrity(
+    State(state): State<AppState>,
+    Json(req): Json<VerifyIndexRequest>,
+) -> Result<Json<memory::IndexIntegrityReport>, AppError> {
+    validation::validate_user_id(&req.user_id).map_validation_err("user_id")?;
+
+    let memory_sys = state
+        .get_user_memory(&req.user_id)
+        .map_err(AppError::Internal)?;
+
+    let memory_guard = memory_sys.read();
+    let report = memory_guard
+        .verify_index_integrity()
+        .map_err(AppError::Internal)?;
+
+    Ok(Json(report))
+}
+
+/// Repair vector index - re-index orphaned memories
+#[derive(Debug, Deserialize)]
+struct RepairIndexRequest {
+    user_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RepairIndexResponse {
+    success: bool,
+    total_storage: usize,
+    total_indexed: usize,
+    repaired: usize,
+    failed: usize,
+    is_healthy: bool,
+}
+
+async fn repair_vector_index(
+    State(state): State<AppState>,
+    Json(req): Json<RepairIndexRequest>,
+) -> Result<Json<RepairIndexResponse>, AppError> {
+    validation::validate_user_id(&req.user_id).map_validation_err("user_id")?;
+
+    let memory_sys = state
+        .get_user_memory(&req.user_id)
+        .map_err(AppError::Internal)?;
+
+    let memory_guard = memory_sys.read();
+    let (total_storage, total_indexed, repaired, failed) = memory_guard
+        .repair_vector_index()
+        .map_err(AppError::Internal)?;
+
+    Ok(Json(RepairIndexResponse {
+        success: failed == 0,
+        total_storage,
+        total_indexed,
+        repaired,
+        failed,
+        is_healthy: total_storage == total_indexed,
+    }))
 }
 
 /// Forget memories by age
@@ -5152,6 +5539,9 @@ async fn main() -> Result<()> {
         .route("/api/remember", post(remember))
         .route("/api/recall", post(recall))
         .route("/api/batch_remember", post(batch_remember))
+        // Mutable memories with external linking (SHO-39)
+        .route("/api/upsert", post(upsert_memory))
+        .route("/api/memory/history", post(get_memory_history))
         // Hebbian Feedback Loop - Wire up learning from task outcomes
         .route("/api/retrieve/tracked", post(retrieve_tracked))
         .route("/api/reinforce", post(reinforce_feedback))
@@ -5178,6 +5568,9 @@ async fn main() -> Result<()> {
         .route("/api/memory/decompress", post(decompress_memory))
         .route("/api/storage/stats", post(get_storage_stats))
         .route("/api/storage/uncompressed", post(get_uncompressed_old))
+        // Index Integrity & Repair (SHO-38)
+        .route("/api/index/verify", post(verify_index_integrity))
+        .route("/api/index/repair", post(repair_vector_index))
         // Forgetting Operations
         .route("/api/forget/age", post(forget_by_age))
         .route("/api/forget/importance", post(forget_by_importance))
