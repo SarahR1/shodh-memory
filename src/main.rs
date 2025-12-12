@@ -27,6 +27,7 @@ mod constants;
 mod embeddings;
 mod errors;
 mod graph_memory;
+mod integrations; // SHO-40: External integrations (Linear, GitHub)
 mod memory;
 mod metrics; // P1.1: Observability
 mod middleware; // P1.3: HTTP request tracking
@@ -1920,6 +1921,285 @@ async fn get_memory_history(
         current_content: memory.experience.content,
         version: memory.version,
         history: history_info,
+    }))
+}
+
+// =============================================================================
+// EXTERNAL INTEGRATIONS (SHO-40)
+// =============================================================================
+
+/// Linear webhook receiver - processes issue create/update/remove events
+///
+/// Transforms Linear webhook payloads into memory upserts with external_id linking.
+/// Supports signature verification via LINEAR_WEBHOOK_SECRET env var.
+///
+/// Example webhook payload:
+/// ```json
+/// {
+///   "action": "update",
+///   "type": "Issue",
+///   "data": {
+///     "id": "uuid",
+///     "identifier": "SHO-39",
+///     "title": "Issue title",
+///     "state": { "name": "In Progress" },
+///     ...
+///   }
+/// }
+/// ```
+#[tracing::instrument(skip(state, body, headers))]
+async fn linear_webhook(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<serde_json::Value>, AppError> {
+    use integrations::linear::LinearWebhook;
+
+    // Get signing secret from env (optional but recommended)
+    let signing_secret = std::env::var("LINEAR_WEBHOOK_SECRET").ok();
+    let webhook = LinearWebhook::new(signing_secret);
+
+    // Verify signature if present
+    if let Some(signature) = headers
+        .get("linear-signature")
+        .and_then(|h| h.to_str().ok())
+    {
+        if !webhook
+            .verify_signature(&body, signature)
+            .map_err(|e| AppError::Internal(e))?
+        {
+            return Err(AppError::InvalidInput {
+                field: "signature".to_string(),
+                reason: "Invalid webhook signature".to_string(),
+            });
+        }
+    }
+
+    // Parse payload
+    let payload = webhook
+        .parse_payload(&body)
+        .map_err(|e| AppError::Internal(e))?;
+
+    // Only process Issue events
+    if payload.entity_type != "Issue" {
+        tracing::debug!(
+            entity_type = %payload.entity_type,
+            "Ignoring non-Issue webhook event"
+        );
+        return Ok(Json(serde_json::json!({
+            "status": "ignored",
+            "reason": "Only Issue events are processed"
+        })));
+    }
+
+    // Handle remove action (soft delete - we keep the memory but mark it)
+    if payload.action == "remove" {
+        tracing::info!(
+            identifier = ?payload.data.identifier,
+            "Issue removed - memory will be retained with deleted marker"
+        );
+        // For now, we just acknowledge - could add deleted flag to memory in future
+        return Ok(Json(serde_json::json!({
+            "status": "acknowledged",
+            "action": "remove"
+        })));
+    }
+
+    // Build external_id from identifier
+    let external_id = match &payload.data.identifier {
+        Some(id) => format!("linear:{}", id),
+        None => format!("linear:{}", payload.data.id),
+    };
+
+    // Transform to content and tags
+    let content = LinearWebhook::issue_to_content(&payload.data);
+    let tags = LinearWebhook::issue_to_tags(&payload.data);
+    let change_type = LinearWebhook::determine_change_type(&payload.action, &payload.data);
+
+    // Determine user_id - use LINEAR_SYNC_USER_ID env var or default
+    let user_id =
+        std::env::var("LINEAR_SYNC_USER_ID").unwrap_or_else(|_| "linear-sync".to_string());
+
+    // Build experience
+    let experience = Experience {
+        content: content.clone(),
+        experience_type: ExperienceType::Task,
+        entities: tags.clone(),
+        ..Default::default()
+    };
+
+    // Parse change type
+    let change_type_enum = match change_type.as_str() {
+        "created" => memory::types::ChangeType::Created,
+        "status_changed" => memory::types::ChangeType::StatusChanged,
+        "tags_updated" => memory::types::ChangeType::TagsUpdated,
+        _ => memory::types::ChangeType::ContentUpdated,
+    };
+
+    // Get memory system
+    let memory_system = state
+        .get_user_memory(&user_id)
+        .map_err(AppError::Internal)?;
+
+    // Perform upsert
+    let (memory_id, was_update) = {
+        let memory = memory_system.clone();
+        let ext_id = external_id.clone();
+        let exp = experience.clone();
+        let ct = change_type_enum;
+        let actor_name = payload
+            .actor
+            .as_ref()
+            .and_then(|a| a.name.clone())
+            .unwrap_or_else(|| "linear-webhook".to_string());
+
+        tokio::task::spawn_blocking(move || {
+            let memory_guard = memory.read();
+            memory_guard.upsert(ext_id, exp, ct, Some(actor_name), None)
+        })
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
+        .map_err(AppError::Internal)?
+    };
+
+    tracing::info!(
+        external_id = %external_id,
+        memory_id = %memory_id.0,
+        was_update = was_update,
+        action = %payload.action,
+        "Linear webhook processed"
+    );
+
+    Ok(Json(serde_json::json!({
+        "status": "success",
+        "memory_id": memory_id.0.to_string(),
+        "external_id": external_id,
+        "was_update": was_update,
+        "action": payload.action
+    })))
+}
+
+/// Bulk sync Linear issues to Shodh memory
+///
+/// Fetches all issues from Linear API and upserts them as memories.
+/// Useful for initial import or catching up after downtime.
+///
+/// Example: POST /api/sync/linear {
+///   "user_id": "linear-sync",
+///   "api_key": "lin_api_...",
+///   "team_id": "optional",
+///   "limit": 100
+/// }
+#[tracing::instrument(skip(state, req), fields(user_id = %req.user_id))]
+async fn linear_sync(
+    State(state): State<AppState>,
+    Json(req): Json<integrations::linear::LinearSyncRequest>,
+) -> Result<Json<integrations::linear::LinearSyncResponse>, AppError> {
+    use integrations::linear::{LinearClient, LinearSyncResponse, LinearWebhook};
+
+    validation::validate_user_id(&req.user_id).map_validation_err("user_id")?;
+
+    // Validate API key format
+    if req.api_key.is_empty() {
+        return Err(AppError::InvalidInput {
+            field: "api_key".to_string(),
+            reason: "Linear API key is required".to_string(),
+        });
+    }
+
+    // Create Linear client
+    let client = LinearClient::new(req.api_key.clone());
+
+    // Fetch issues from Linear
+    let issues = client
+        .fetch_issues(
+            req.team_id.as_deref(),
+            req.updated_after.as_deref(),
+            req.limit,
+        )
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("Failed to fetch Linear issues: {}", e)))?;
+
+    let total = issues.len();
+    let mut created_count = 0;
+    let mut updated_count = 0;
+    let mut error_count = 0;
+    let mut errors = Vec::new();
+
+    // Get memory system
+    let memory_system = state
+        .get_user_memory(&req.user_id)
+        .map_err(AppError::Internal)?;
+
+    // Process each issue
+    for issue in issues {
+        let external_id = match &issue.identifier {
+            Some(id) => format!("linear:{}", id),
+            None => format!("linear:{}", issue.id),
+        };
+
+        let content = LinearWebhook::issue_to_content(&issue);
+        let tags = LinearWebhook::issue_to_tags(&issue);
+
+        let experience = Experience {
+            content,
+            experience_type: ExperienceType::Task,
+            entities: tags,
+            ..Default::default()
+        };
+
+        // Perform upsert
+        let result = {
+            let memory = memory_system.clone();
+            let ext_id = external_id.clone();
+            let exp = experience;
+
+            tokio::task::spawn_blocking(move || {
+                let memory_guard = memory.read();
+                memory_guard.upsert(
+                    ext_id,
+                    exp,
+                    memory::types::ChangeType::ContentUpdated,
+                    Some("linear-bulk-sync".to_string()),
+                    None,
+                )
+            })
+            .await
+        };
+
+        match result {
+            Ok(Ok((_, was_update))) => {
+                if was_update {
+                    updated_count += 1;
+                } else {
+                    created_count += 1;
+                }
+            }
+            Ok(Err(e)) => {
+                error_count += 1;
+                errors.push(format!("{}: {}", external_id, e));
+            }
+            Err(e) => {
+                error_count += 1;
+                errors.push(format!("{}: Task panicked: {}", external_id, e));
+            }
+        }
+    }
+
+    tracing::info!(
+        total = total,
+        created = created_count,
+        updated = updated_count,
+        errors = error_count,
+        "Linear bulk sync completed"
+    );
+
+    Ok(Json(LinearSyncResponse {
+        synced_count: total,
+        created_count,
+        updated_count,
+        error_count,
+        errors,
     }))
 }
 
@@ -5542,6 +5822,9 @@ async fn main() -> Result<()> {
         // Mutable memories with external linking (SHO-39)
         .route("/api/upsert", post(upsert_memory))
         .route("/api/memory/history", post(get_memory_history))
+        // External integrations (SHO-40)
+        .route("/webhook/linear", post(linear_webhook))
+        .route("/api/sync/linear", post(linear_sync))
         // Hebbian Feedback Loop - Wire up learning from task outcomes
         .route("/api/retrieve/tracked", post(retrieve_tracked))
         .route("/api/reinforce", post(reinforce_feedback))

@@ -21,6 +21,7 @@ pub mod constants;
 pub mod embeddings;
 pub mod errors;
 pub mod graph_memory;
+pub mod integrations;
 pub mod memory;
 pub mod metrics;
 pub mod middleware;
