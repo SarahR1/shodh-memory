@@ -1658,7 +1658,7 @@ async fn remember(
         }
     };
 
-    // Merge user tags with NER-extracted entities (deduplicated)
+    // Merge user tags with NER-extracted entities (deduplicated) for entity search
     let mut merged_entities: Vec<String> = req.tags.clone();
     for entity_name in extracted_names {
         if !merged_entities
@@ -1670,10 +1670,12 @@ async fn remember(
     }
 
     // Auto-create Experience with sensible defaults
+    // Note: tags field is for explicit user tags, entities field includes tags + NER-extracted
     let experience = Experience {
         content: req.content.clone(),
         experience_type,
         entities: merged_entities,
+        tags: req.tags.clone(),
         ..Default::default()
     };
 
@@ -2388,6 +2390,7 @@ async fn github_sync(
 
     let mut issues_synced = 0;
     let mut prs_synced = 0;
+    let mut commits_synced = 0;
     let mut created_count = 0;
     let mut updated_count = 0;
     let mut error_count = 0;
@@ -2518,12 +2521,73 @@ async fn github_sync(
         }
     }
 
-    let total = issues_synced + prs_synced;
+    // Sync commits if requested
+    if req.sync_commits {
+        let commits = client
+            .fetch_commits(&req.owner, &req.repo, req.branch.as_deref(), req.limit)
+            .await
+            .map_err(|e| {
+                AppError::Internal(anyhow::anyhow!("Failed to fetch GitHub commits: {}", e))
+            })?;
+
+        for commit in commits {
+            let external_id = GitHubWebhook::commit_external_id(&repo_info, &commit.sha);
+            let content = GitHubWebhook::commit_to_content(&commit, &repo_info);
+            let tags = GitHubWebhook::commit_to_tags(&commit, &repo_info);
+
+            let experience = Experience {
+                content,
+                experience_type: ExperienceType::CodeEdit,
+                entities: tags,
+                ..Default::default()
+            };
+
+            let result = {
+                let memory = memory_system.clone();
+                let ext_id = external_id.clone();
+                let exp = experience;
+
+                tokio::task::spawn_blocking(move || {
+                    let memory_guard = memory.read();
+                    memory_guard.upsert(
+                        ext_id,
+                        exp,
+                        memory::types::ChangeType::ContentUpdated,
+                        Some("github-bulk-sync".to_string()),
+                        None,
+                    )
+                })
+                .await
+            };
+
+            match result {
+                Ok(Ok((_, was_update))) => {
+                    commits_synced += 1;
+                    if was_update {
+                        updated_count += 1;
+                    } else {
+                        created_count += 1;
+                    }
+                }
+                Ok(Err(e)) => {
+                    error_count += 1;
+                    errors.push(format!("{}: {}", external_id, e));
+                }
+                Err(e) => {
+                    error_count += 1;
+                    errors.push(format!("{}: Task panicked: {}", external_id, e));
+                }
+            }
+        }
+    }
+
+    let total = issues_synced + prs_synced + commits_synced;
 
     tracing::info!(
         total = total,
         issues = issues_synced,
         prs = prs_synced,
+        commits = commits_synced,
         created = created_count,
         updated = updated_count,
         errors = error_count,
@@ -2534,6 +2598,7 @@ async fn github_sync(
         synced_count: total,
         issues_synced,
         prs_synced,
+        commits_synced,
         created_count,
         updated_count,
         error_count,
@@ -4813,6 +4878,75 @@ async fn repair_vector_index(
     }))
 }
 
+/// Cleanup corrupted memories that fail to deserialize
+#[derive(Debug, Deserialize)]
+struct CleanupCorruptedRequest {
+    user_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CleanupCorruptedResponse {
+    success: bool,
+    deleted_count: usize,
+}
+
+async fn cleanup_corrupted(
+    State(state): State<AppState>,
+    Json(req): Json<CleanupCorruptedRequest>,
+) -> Result<Json<CleanupCorruptedResponse>, AppError> {
+    validation::validate_user_id(&req.user_id).map_validation_err("user_id")?;
+
+    let memory_sys = state
+        .get_user_memory(&req.user_id)
+        .map_err(AppError::Internal)?;
+
+    let memory_guard = memory_sys.read();
+    let deleted_count = memory_guard
+        .cleanup_corrupted()
+        .map_err(AppError::Internal)?;
+
+    Ok(Json(CleanupCorruptedResponse {
+        success: true,
+        deleted_count,
+    }))
+}
+
+/// Rebuild vector index from storage (removes orphaned index entries)
+#[derive(Debug, Deserialize)]
+struct RebuildIndexRequest {
+    user_id: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RebuildIndexResponse {
+    success: bool,
+    storage_count: usize,
+    indexed_count: usize,
+    is_healthy: bool,
+}
+
+async fn rebuild_index(
+    State(state): State<AppState>,
+    Json(req): Json<RebuildIndexRequest>,
+) -> Result<Json<RebuildIndexResponse>, AppError> {
+    validation::validate_user_id(&req.user_id).map_validation_err("user_id")?;
+
+    let memory_sys = state
+        .get_user_memory(&req.user_id)
+        .map_err(AppError::Internal)?;
+
+    let memory_guard = memory_sys.read();
+    let (storage_count, indexed_count) =
+        memory_guard.rebuild_index().map_err(AppError::Internal)?;
+
+    Ok(Json(RebuildIndexResponse {
+        success: true,
+        storage_count,
+        indexed_count,
+        is_healthy: storage_count == indexed_count,
+    }))
+}
+
 /// Forget memories by age
 #[derive(Debug, Deserialize)]
 struct ForgetByAgeRequest {
@@ -6194,6 +6328,8 @@ async fn main() -> Result<()> {
         // Index Integrity & Repair (SHO-38)
         .route("/api/index/verify", post(verify_index_integrity))
         .route("/api/index/repair", post(repair_vector_index))
+        .route("/api/index/rebuild", post(rebuild_index))
+        .route("/api/storage/cleanup", post(cleanup_corrupted))
         // Forgetting Operations
         .route("/api/forget/age", post(forget_by_age))
         .route("/api/forget/importance", post(forget_by_importance))

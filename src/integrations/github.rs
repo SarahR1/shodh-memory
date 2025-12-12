@@ -1,8 +1,8 @@
-//! GitHub integration for syncing Issues and PRs to Shodh memory
+//! GitHub integration for syncing Issues, PRs, and Commits to Shodh memory
 //!
 //! Provides:
 //! - Webhook receiver for real-time issue/PR updates
-//! - Bulk sync for importing existing issues and PRs
+//! - Bulk sync for importing existing issues, PRs, and commits
 //! - HMAC-SHA256 signature verification
 
 use anyhow::{Context, Result};
@@ -160,6 +160,63 @@ pub struct GitHubBranch {
     pub repo: Option<GitHubRepository>,
 }
 
+/// GitHub Commit
+#[derive(Debug, Clone, Deserialize)]
+pub struct GitHubCommit {
+    pub sha: String,
+    pub commit: GitHubCommitData,
+    pub html_url: String,
+    #[serde(default)]
+    pub author: Option<GitHubUser>,
+    #[serde(default)]
+    pub committer: Option<GitHubUser>,
+    #[serde(default)]
+    pub stats: Option<GitHubCommitStats>,
+    #[serde(default)]
+    pub files: Option<Vec<GitHubCommitFile>>,
+}
+
+/// Inner commit data (message, author info)
+#[derive(Debug, Clone, Deserialize)]
+pub struct GitHubCommitData {
+    pub message: String,
+    pub author: GitHubCommitAuthor,
+    pub committer: GitHubCommitAuthor,
+}
+
+/// Commit author/committer info
+#[derive(Debug, Clone, Deserialize)]
+pub struct GitHubCommitAuthor {
+    pub name: String,
+    pub email: String,
+    pub date: String,
+}
+
+/// Commit statistics (additions/deletions)
+#[derive(Debug, Clone, Deserialize)]
+pub struct GitHubCommitStats {
+    #[serde(default)]
+    pub additions: u32,
+    #[serde(default)]
+    pub deletions: u32,
+    #[serde(default)]
+    pub total: u32,
+}
+
+/// File changed in a commit
+#[derive(Debug, Clone, Deserialize)]
+pub struct GitHubCommitFile {
+    pub filename: String,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub additions: u32,
+    #[serde(default)]
+    pub deletions: u32,
+    #[serde(default)]
+    pub changes: u32,
+}
+
 // =============================================================================
 // WEBHOOK HANDLER
 // =============================================================================
@@ -313,6 +370,58 @@ impl GitHubWebhook {
         parts.join("\n")
     }
 
+    /// Transform GitHub commit to memory content
+    pub fn commit_to_content(commit: &GitHubCommit, repo: &GitHubRepository) -> String {
+        let mut parts = Vec::new();
+
+        // Header: commit SHA (short) and first line of message
+        let short_sha = &commit.sha[..7.min(commit.sha.len())];
+        let first_line = commit.commit.message.lines().next().unwrap_or("");
+        parts.push(format!("Commit {}: {}", short_sha, first_line));
+
+        // Author info
+        parts.push(format!(
+            "Author: {} <{}>",
+            commit.commit.author.name, commit.commit.author.email
+        ));
+        parts.push(format!("Date: {}", commit.commit.author.date));
+
+        // Stats if available
+        if let Some(stats) = &commit.stats {
+            parts.push(format!(
+                "+{} -{} ({} total)",
+                stats.additions, stats.deletions, stats.total
+            ));
+        }
+
+        // Files changed if available
+        if let Some(files) = &commit.files {
+            if !files.is_empty() {
+                let file_count = files.len();
+                parts.push(format!("{} files changed", file_count));
+                // List first few files
+                for file in files.iter().take(5) {
+                    let status = file.status.as_deref().unwrap_or("modified");
+                    parts.push(format!("  {} {}", status, file.filename));
+                }
+                if file_count > 5 {
+                    parts.push(format!("  ... and {} more", file_count - 5));
+                }
+            }
+        }
+
+        parts.push(format!("Repo: {}", repo.full_name));
+
+        // Full commit message if multiline
+        let lines: Vec<&str> = commit.commit.message.lines().collect();
+        if lines.len() > 1 {
+            parts.push(String::new());
+            parts.push(commit.commit.message.clone());
+        }
+
+        parts.join("\n")
+    }
+
     /// Extract tags from GitHub issue
     pub fn issue_to_tags(issue: &GitHubIssue, repo: &GitHubRepository) -> Vec<String> {
         let mut tags = vec![
@@ -377,6 +486,31 @@ impl GitHubWebhook {
         tags
     }
 
+    /// Extract tags from GitHub commit
+    pub fn commit_to_tags(commit: &GitHubCommit, repo: &GitHubRepository) -> Vec<String> {
+        let mut tags = vec![
+            "github".to_string(),
+            "commit".to_string(),
+            repo.full_name.clone(),
+            commit.sha[..7.min(commit.sha.len())].to_string(),
+        ];
+
+        // Add author
+        tags.push(commit.commit.author.name.clone());
+
+        // Add committer if different from author
+        if commit.commit.committer.name != commit.commit.author.name {
+            tags.push(commit.commit.committer.name.clone());
+        }
+
+        // Add GitHub user login if available
+        if let Some(author) = &commit.author {
+            tags.push(author.login.clone());
+        }
+
+        tags
+    }
+
     /// Determine change type from webhook action
     pub fn determine_change_type(action: &str, is_pr: bool) -> String {
         match action {
@@ -401,13 +535,18 @@ impl GitHubWebhook {
     pub fn pr_external_id(repo: &GitHubRepository, pr_number: u64) -> String {
         format!("github:{}#pr-{}", repo.full_name, pr_number)
     }
+
+    /// Build external_id for commit
+    pub fn commit_external_id(repo: &GitHubRepository, sha: &str) -> String {
+        format!("github:{}#commit-{}", repo.full_name, sha)
+    }
 }
 
 // =============================================================================
 // BULK SYNC TYPES
 // =============================================================================
 
-/// Request for bulk syncing GitHub issues/PRs
+/// Request for bulk syncing GitHub issues/PRs/commits
 #[derive(Debug, Deserialize)]
 pub struct GitHubSyncRequest {
     /// User ID to associate memories with
@@ -424,12 +563,18 @@ pub struct GitHubSyncRequest {
     /// Sync pull requests (default: true)
     #[serde(default = "default_true")]
     pub sync_prs: bool,
+    /// Sync commits (default: false)
+    #[serde(default)]
+    pub sync_commits: bool,
     /// Only sync items with state (open, closed, all) - default: all
     #[serde(default = "default_state")]
     pub state: String,
     /// Limit number of items to sync per type
     #[serde(default)]
     pub limit: Option<usize>,
+    /// Branch to sync commits from (default: default branch)
+    #[serde(default)]
+    pub branch: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -449,6 +594,8 @@ pub struct GitHubSyncResponse {
     pub issues_synced: usize,
     /// PRs synced
     pub prs_synced: usize,
+    /// Commits synced
+    pub commits_synced: usize,
     /// Items created (new)
     pub created_count: usize,
     /// Items updated (existing)
@@ -569,6 +716,52 @@ impl GitHubClient {
         Ok(prs)
     }
 
+    /// Fetch commits from GitHub
+    pub async fn fetch_commits(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: Option<&str>,
+        limit: Option<usize>,
+    ) -> Result<Vec<GitHubCommit>> {
+        let per_page = limit.unwrap_or(100).min(100);
+        let mut url = format!(
+            "{}/repos/{}/{}/commits?per_page={}",
+            Self::API_URL,
+            owner,
+            repo,
+            per_page
+        );
+
+        if let Some(branch) = branch {
+            url.push_str(&format!("&sha={}", branch));
+        }
+
+        let response = self
+            .client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.token))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "shodh-memory")
+            .header("X-GitHub-Api-Version", "2022-11-28")
+            .send()
+            .await
+            .context("Failed to send request to GitHub API")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            anyhow::bail!("GitHub API error: {} - {}", status, body);
+        }
+
+        let commits: Vec<GitHubCommit> = response
+            .json()
+            .await
+            .context("Failed to parse GitHub commits response")?;
+
+        Ok(commits)
+    }
+
     /// Get repository info
     pub async fn get_repository(&self, owner: &str, repo: &str) -> Result<GitHubRepository> {
         let url = format!("{}/repos/{}/{}", Self::API_URL, owner, repo);
@@ -677,5 +870,82 @@ mod tests {
 
         let pr_id = GitHubWebhook::pr_external_id(&repo, 456);
         assert_eq!(pr_id, "github:varun29ankuS/shodh-memory#pr-456");
+    }
+
+    #[test]
+    fn test_commit_external_id() {
+        let repo = GitHubRepository {
+            id: 1,
+            name: "shodh-memory".to_string(),
+            full_name: "varun29ankuS/shodh-memory".to_string(),
+            description: None,
+            html_url: "https://github.com/varun29ankuS/shodh-memory".to_string(),
+            owner: GitHubUser {
+                id: 1,
+                login: "varun29ankuS".to_string(),
+                name: None,
+                avatar_url: None,
+            },
+        };
+
+        let commit_id = GitHubWebhook::commit_external_id(&repo, "abc123def456");
+        assert_eq!(
+            commit_id,
+            "github:varun29ankuS/shodh-memory#commit-abc123def456"
+        );
+    }
+
+    #[test]
+    fn test_commit_to_content() {
+        let repo = GitHubRepository {
+            id: 1,
+            name: "shodh-memory".to_string(),
+            full_name: "varun29ankuS/shodh-memory".to_string(),
+            description: None,
+            html_url: "https://github.com/varun29ankuS/shodh-memory".to_string(),
+            owner: GitHubUser {
+                id: 1,
+                login: "varun29ankuS".to_string(),
+                name: None,
+                avatar_url: None,
+            },
+        };
+
+        let commit = GitHubCommit {
+            sha: "abc123def456789".to_string(),
+            html_url: "https://github.com/varun29ankuS/shodh-memory/commit/abc123".to_string(),
+            commit: GitHubCommitData {
+                message: "feat: add commit sync\n\nThis adds commit history sync support."
+                    .to_string(),
+                author: GitHubCommitAuthor {
+                    name: "Varun".to_string(),
+                    email: "varun@example.com".to_string(),
+                    date: "2025-01-01T00:00:00Z".to_string(),
+                },
+                committer: GitHubCommitAuthor {
+                    name: "Varun".to_string(),
+                    email: "varun@example.com".to_string(),
+                    date: "2025-01-01T00:00:00Z".to_string(),
+                },
+            },
+            author: Some(GitHubUser {
+                id: 1,
+                login: "varun29ankuS".to_string(),
+                name: Some("Varun".to_string()),
+                avatar_url: None,
+            }),
+            committer: None,
+            stats: Some(GitHubCommitStats {
+                additions: 100,
+                deletions: 20,
+                total: 120,
+            }),
+            files: None,
+        };
+
+        let content = GitHubWebhook::commit_to_content(&commit, &repo);
+        assert!(content.contains("Commit abc123d: feat: add commit sync"));
+        assert!(content.contains("Author: Varun <varun@example.com>"));
+        assert!(content.contains("+100 -20 (120 total)"));
     }
 }

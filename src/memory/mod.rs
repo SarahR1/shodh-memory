@@ -1451,6 +1451,36 @@ impl MemorySystem {
         })
     }
 
+    /// Cleanup corrupted memories that fail to deserialize
+    /// Returns the number of entries deleted
+    pub fn cleanup_corrupted(&self) -> Result<usize> {
+        self.long_term_memory.cleanup_corrupted()
+    }
+
+    /// Rebuild vector index from scratch using only valid memories in storage
+    /// This removes orphaned index entries and rebuilds with proper ID mappings
+    /// Returns (total_memories, total_indexed)
+    pub fn rebuild_index(&self) -> Result<(usize, usize)> {
+        tracing::info!("Starting full index rebuild from storage");
+        self.retriever.rebuild_index()?;
+        let indexed = self.retriever.len();
+        let storage_count = self.long_term_memory.get_stats()?.total_count;
+
+        // Update stats
+        {
+            let mut stats = self.stats.write();
+            stats.vector_index_count = indexed;
+        }
+
+        tracing::info!(
+            storage_count = storage_count,
+            indexed = indexed,
+            "Index rebuild complete"
+        );
+
+        Ok((storage_count, indexed))
+    }
+
     /// Save vector index to disk (shutdown persistence)
     pub fn save_vector_index(&self, path: &Path) -> Result<()> {
         self.retriever.save_index(path)

@@ -70,6 +70,11 @@ impl IdMapping {
     fn len(&self) -> usize {
         self.memory_to_vector.len()
     }
+
+    fn clear(&mut self) {
+        self.memory_to_vector.clear();
+        self.vector_to_memory.clear();
+    }
 }
 
 impl RetrievalEngine {
@@ -694,8 +699,9 @@ impl RetrievalEngine {
         let mut index = self.vector_index.write();
         index.build(vectors)?;
 
-        // Build ID mapping
+        // Clear and rebuild ID mapping
         let mut id_mapping = self.id_mapping.write();
+        id_mapping.clear();
         for (vector_id, memory_id) in memory_ids.into_iter().enumerate() {
             id_mapping.insert(memory_id, vector_id as u32);
         }

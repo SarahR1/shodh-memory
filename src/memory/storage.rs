@@ -183,6 +183,13 @@ impl MemoryStorage {
             batch.put(entity_key.as_bytes(), b"1");
         }
 
+        // Index by tags (separate from entities for explicit tag queries)
+        for tag in &memory.experience.tags {
+            let normalized_tag = tag.to_lowercase();
+            let tag_key = format!("tag:{}:{}", normalized_tag, memory.id.0);
+            batch.put(tag_key.as_bytes(), b"1");
+        }
+
         // === Robotics Indices ===
 
         // Index by robot_id (for multi-robot systems)
@@ -346,6 +353,13 @@ impl MemoryStorage {
         for entity in &memory.experience.entities {
             let entity_key = format!("entity:{}:{}", entity, id.0);
             batch.delete(entity_key.as_bytes());
+        }
+
+        // Tag indices
+        for tag in &memory.experience.tags {
+            let normalized_tag = tag.to_lowercase();
+            let tag_key = format!("tag:{}:{}", normalized_tag, id.0);
+            batch.delete(tag_key.as_bytes());
         }
 
         // Robot index
@@ -596,7 +610,7 @@ impl MemoryStorage {
         for tag in tags {
             // Normalize to lowercase for case-insensitive matching
             let normalized_tag = tag.to_lowercase();
-            let prefix = format!("entity:{normalized_tag}:");
+            let prefix = format!("tag:{normalized_tag}:");
             let iter = self.index_db.iterator(IteratorMode::From(
                 prefix.as_bytes(),
                 rocksdb::Direction::Forward,
@@ -959,6 +973,40 @@ impl MemoryStorage {
         }
 
         Ok(stats)
+    }
+
+    /// Remove corrupted memories that fail to deserialize
+    /// Returns the number of entries deleted
+    pub fn cleanup_corrupted(&self) -> Result<usize> {
+        let mut to_delete = Vec::new();
+
+        let iter = self.db.iterator(IteratorMode::Start);
+        for item in iter {
+            if let Ok((key, value)) = item {
+                if bincode::deserialize::<Memory>(&value).is_err() {
+                    to_delete.push(key.to_vec());
+                }
+            }
+        }
+
+        let count = to_delete.len();
+        if count > 0 {
+            tracing::info!("Cleaning up {} corrupted memory entries", count);
+
+            let mut write_opts = WriteOptions::default();
+            write_opts.set_sync(self.write_mode == WriteMode::Sync);
+
+            for key in to_delete {
+                if let Err(e) = self.db.delete_opt(&key, &write_opts) {
+                    tracing::warn!("Failed to delete corrupted entry: {}", e);
+                }
+            }
+
+            // Flush to persist deletions
+            self.flush()?;
+        }
+
+        Ok(count)
     }
 
     /// Flush both databases to ensure all data is persisted (critical for graceful shutdown)

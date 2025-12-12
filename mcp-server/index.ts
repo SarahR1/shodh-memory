@@ -23,11 +23,127 @@ import {
 
 // Configuration
 const API_URL = process.env.SHODH_API_URL || "http://127.0.0.1:3030";
+const WS_URL = API_URL.replace(/^http/, "ws") + "/api/stream";
 const API_KEY = process.env.SHODH_API_KEY || "sk-shodh-dev-4f8b2c1d9e3a7f5b6d2c8e4a1b9f7d3c";
 const USER_ID = process.env.SHODH_USER_ID || "claude-code";
 const RETRY_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 1000;
 const REQUEST_TIMEOUT_MS = 10000;
+
+// Streaming ingestion settings
+const STREAM_ENABLED = process.env.SHODH_STREAM !== "false"; // enabled by default
+const STREAM_MIN_CONTENT_LENGTH = 50; // minimum content length to stream
+
+// =============================================================================
+// STREAMING MEMORY INGESTION - Continuous background memory capture
+// =============================================================================
+
+let streamSocket: WebSocket | null = null;
+let streamConnecting = false;
+let streamReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Buffer for messages while reconnecting
+const streamBuffer: string[] = [];
+const MAX_BUFFER_SIZE = 100;
+let streamHandshakeComplete = false;
+
+// Connect to streaming endpoint
+async function connectStream(): Promise<void> {
+  if (!STREAM_ENABLED || streamConnecting || (streamSocket?.readyState === WebSocket.OPEN)) {
+    return;
+  }
+
+  streamConnecting = true;
+  streamHandshakeComplete = false;
+
+  try {
+    streamSocket = new WebSocket(WS_URL, {
+      headers: { "X-API-Key": API_KEY },
+    } as unknown as string[]);
+
+    streamSocket.onopen = () => {
+      streamConnecting = false;
+      // Send handshake first - server expects StreamHandshake as first message
+      const handshake = JSON.stringify({
+        user_id: USER_ID,
+        mode: "Conversation",
+        extraction_config: {
+          checkpoint_interval_ms: 5000,
+          max_buffer_size: 50,
+          auto_dedupe: true,
+          extract_entities: true,
+        },
+      });
+      streamSocket?.send(handshake);
+    };
+
+    streamSocket.onmessage = (event) => {
+      try {
+        const response = JSON.parse(event.data as string);
+        // Check for handshake ACK
+        if (response.Ack && response.Ack.message_type === "handshake") {
+          streamHandshakeComplete = true;
+          // Now flush buffered messages
+          while (streamBuffer.length > 0) {
+            const msg = streamBuffer.shift();
+            if (msg && streamSocket?.readyState === WebSocket.OPEN) {
+              streamSocket.send(msg);
+            }
+          }
+        }
+      } catch {
+        // Ignore parse errors
+      }
+    };
+
+    streamSocket.onclose = () => {
+      streamSocket = null;
+      streamConnecting = false;
+      streamHandshakeComplete = false;
+      // Reconnect after delay
+      if (STREAM_ENABLED && !streamReconnectTimer) {
+        streamReconnectTimer = setTimeout(() => {
+          streamReconnectTimer = null;
+          connectStream().catch(() => {});
+        }, 5000);
+      }
+    };
+
+    streamSocket.onerror = () => {
+      // Error handler - close will be called after
+    };
+  } catch {
+    streamConnecting = false;
+  }
+}
+
+// Stream a memory to the server (non-blocking)
+function streamMemory(content: string, tags: string[] = [], source: string = "assistant"): void {
+  if (!STREAM_ENABLED || content.length < STREAM_MIN_CONTENT_LENGTH) return;
+
+  // Server expects StreamMessage::Content enum format
+  const message = JSON.stringify({
+    Content: {
+      content: content.slice(0, 4000),
+      source: source,
+      tags: ["stream", ...tags],
+      metadata: {},
+    },
+  });
+
+  if (streamSocket?.readyState === WebSocket.OPEN && streamHandshakeComplete) {
+    streamSocket.send(message);
+  } else {
+    // Buffer message and try to reconnect
+    if (streamBuffer.length < MAX_BUFFER_SIZE) {
+      streamBuffer.push(message);
+    }
+    connectStream().catch(() => {});
+  }
+}
+
+// Initialize stream connection on server start
+connectStream().catch(() => {});
 
 // Types matching the Rust API response structure
 interface Experience {
@@ -63,6 +179,17 @@ function getType(m: Memory): string {
 // Helper: Sleep for retry delays
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Stream tool interactions automatically (non-blocking)
+function streamToolCall(toolName: string, args: Record<string, unknown>, resultText: string): void {
+  // Skip ingesting memory management tools to avoid noise
+  if (["remember", "recall", "forget", "list_memories"].includes(toolName)) return;
+
+  const argsStr = JSON.stringify(args, null, 2);
+  const content = `Tool: ${toolName}\nInput: ${argsStr}\nResult: ${resultText.slice(0, 1000)}${resultText.length > 1000 ? "..." : ""}`;
+
+  streamMemory(content, ["tool-call", toolName], "tool");
 }
 
 // Robust API call with retries and timeout
@@ -426,9 +553,33 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
   };
 });
 
+// Auto-stream context from tool arguments (captures conversation intent)
+function autoStreamContext(toolName: string, args: Record<string, unknown>): void {
+  // Skip tools that already handle their own streaming
+  if (["proactive_context"].includes(toolName)) return;
+
+  // Extract meaningful context from tool arguments
+  let context = "";
+  if (args.query && typeof args.query === "string") {
+    context = `Query: ${args.query}`;
+  } else if (args.content && typeof args.content === "string") {
+    context = args.content;
+  } else if (args.context && typeof args.context === "string") {
+    context = args.context;
+  }
+
+  // Stream if we have meaningful context
+  if (context.length >= 20) {
+    streamMemory(context, ["auto-context", toolName], "user");
+  }
+}
+
 // Handle tool calls
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+
+  // Auto-capture context from tool arguments (non-blocking)
+  autoStreamContext(name, args as Record<string, unknown>);
 
   // Check server availability first
   const serverUp = await isServerAvailable();
@@ -444,7 +595,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 
-  try {
+  // Result type for tool responses
+  type ToolResult = { content: { type: string; text: string }[]; isError?: boolean };
+
+  // Inner function to execute tool logic - allows us to capture result for auto-ingest
+  const executeTool = async (): Promise<ToolResult> => {
     switch (name) {
       case "remember": {
         const { content, type = "Observation", tags = [] } = args as {
@@ -917,17 +1072,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           auto_ingest?: boolean;
         };
 
-        // Auto-ingest: Store conversation context as a memory (fire and forget)
-        // Only ingest if context is substantial (> 100 chars) to avoid noise
+        // Stream context to memory (non-blocking, uses WebSocket)
         if (auto_ingest && context.length > 100) {
-          apiCall<{ memory_id: string }>("/api/record", "POST", {
-            user_id: USER_ID,
-            experience: {
-              content: context.slice(0, 2000), // Limit to 2000 chars per memory
-              experience_type: "Conversation",
-              tags: ["auto-ingest", "proactive-context"],
-            },
-          }).catch(() => {}); // Silently ignore failures - don't block surfacing
+          streamMemory(context.slice(0, 2000), ["proactive-context"]);
         }
 
         interface DetectedEntity {
@@ -1163,6 +1310,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       default:
         throw new Error(`Unknown tool: ${name}`);
     }
+  };
+
+  // Execute tool and stream result automatically
+  try {
+    const result = await executeTool();
+
+    // Stream tool interaction to memory (non-blocking)
+    const resultText = result.content.map(c => c.text).join('\n');
+    streamToolCall(name, args as Record<string, unknown>, resultText);
+
+    return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
 
