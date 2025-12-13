@@ -155,7 +155,7 @@ curl -X POST http://localhost:3030/api/record \
   }'
 
 # Search
-curl -X POST http://localhost:3030/api/retrieve \
+curl -X POST http://localhost:3030/api/recall \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-key" \
   -d '{"user_id": "agent-1", "query": "deployment requirements", "limit": 5}'
@@ -191,8 +191,8 @@ Importance also increases with: content length, entity density, technical terms,
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/record` | POST | Store memory |
-| `/api/retrieve` | POST | Semantic search |
+| `/api/remember` | POST | Store memory |
+| `/api/recall` | POST | Semantic search |
 | `/api/memories` | POST | List memories |
 | `/api/memory/{id}` | GET/DELETE | Single memory operations |
 | `/api/users/{id}/stats` | GET | User statistics |

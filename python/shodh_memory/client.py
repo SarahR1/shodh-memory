@@ -409,14 +409,18 @@ class Memory:
             raise ShodhValidationError("Must provide either query or query_embedding", field="query")
 
         try:
+            # Note: query_embedding parameter is deprecated - use query text instead
+            if query_embedding is not None:
+                import warnings
+                warnings.warn("query_embedding parameter is deprecated. Use query text instead.", DeprecationWarning)
+
             response = self._session.post(
-                f"{self.base_url}/api/retrieve",
+                f"{self.base_url}/api/recall",
                 json={
                     "user_id": self.user_id,
-                    "query_text": query,
-                    "query_embedding": query_embedding,
-                    "max_results": max_results,
-                    "importance_threshold": importance_threshold
+                    "query": query or "",
+                    "limit": max_results,
+                    "mode": "hybrid"
                 },
                 timeout=self.timeout
             )
@@ -680,11 +684,12 @@ class Memory:
         """
         try:
             response = self._session.post(
-                f"{self.base_url}/api/retrieve",
+                f"{self.base_url}/api/recall",
                 json={
                     "user_id": self.user_id,
                     "query": query,
-                    "limit": limit
+                    "limit": limit,
+                    "mode": "hybrid"
                 },
                 timeout=self.timeout
             )

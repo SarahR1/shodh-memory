@@ -246,7 +246,7 @@ async function runBenchmark(): Promise<BenchmarkReport> {
   for (const searchTest of searchTests) {
     try {
       const { result, latency_ms } = await measureLatency(() =>
-        apiCall("/api/retrieve", "POST", {
+        apiCall("/api/recall", "POST", {
           user_id: USER_ID,
           query: searchTest.query,
           limit: 3,
@@ -371,7 +371,7 @@ async function runBenchmark(): Promise<BenchmarkReport> {
   console.log("\n📋 Test 7: Edge Cases...");
   try {
     const { result, latency_ms } = await measureLatency(() =>
-      apiCall("/api/retrieve", "POST", {
+      apiCall("/api/recall", "POST", {
         user_id: USER_ID,
         query: "completely random gibberish xyzzy12345",
         limit: 3,

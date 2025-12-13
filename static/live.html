@@ -1088,7 +1088,7 @@
             const query = document.getElementById('testContent').value.trim() || 'test';
 
             try {
-                const res = await fetch(`${API}/api/retrieve`, {
+                const res = await fetch(`${API}/api/recall`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'X-API-Key': KEY },
                     body: JSON.stringify({ user_id: userId, query, limit: 5 })

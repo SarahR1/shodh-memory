@@ -66,7 +66,7 @@ async function quickSearch() {
     resultsDiv.innerHTML = '<p>🔍 Searching...</p>';
 
     try {
-        const response = await fetch(`${apiUrl}/api/retrieve`, {
+        const response = await fetch(`${apiUrl}/api/recall`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -300,7 +300,7 @@ async function testSearchSpeed() {
 
     const start = performance.now();
     try {
-        await fetch(`${apiUrl}/api/retrieve`, {
+        await fetch(`${apiUrl}/api/recall`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

@@ -6354,7 +6354,7 @@ async fn main() -> Result<()> {
     let protected_routes = Router::new()
         // Core endpoints
         .route("/api/record", post(record_experience))
-        .route("/api/retrieve", post(retrieve_memories))
+        // /api/retrieve removed - use /api/recall instead
         // Simplified LLM-friendly endpoints (effortless API)
         .route("/api/remember", post(remember))
         .route("/api/recall", post(recall))
