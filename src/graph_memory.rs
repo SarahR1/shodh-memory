@@ -376,8 +376,14 @@ pub struct GraphMemory {
     /// RocksDB storage for entity name -> UUID index (persisted, O(1) startup)
     entity_name_index_db: Arc<DB>,
 
+    /// RocksDB storage for lowercase name -> UUID index (for O(1) case-insensitive lookup)
+    entity_lowercase_index_db: Arc<DB>,
+
     /// In-memory entity name index for fast lookups (loaded from entity_name_index_db)
     entity_name_index: Arc<parking_lot::RwLock<HashMap<String, Uuid>>>,
+
+    /// In-memory lowercase name index for O(1) case-insensitive lookups
+    entity_lowercase_index: Arc<parking_lot::RwLock<HashMap<String, Uuid>>>,
 
     // === Atomic counters for O(1) stats (P1 fix) ===
     /// Entity count - initialized from entity_name_index.len(), updated on add
@@ -405,11 +411,20 @@ impl GraphMemory {
         let entity_edges_db = Arc::new(DB::open(&opts, path.join("graph_entity_edges"))?);
         let entity_episodes_db = Arc::new(DB::open(&opts, path.join("graph_entity_episodes"))?);
         let entity_name_index_db = Arc::new(DB::open(&opts, path.join("graph_entity_name_index"))?);
+        let entity_lowercase_index_db =
+            Arc::new(DB::open(&opts, path.join("graph_entity_lowercase_index"))?);
 
         // Load entity name index from persisted DB (O(n) but faster than deserializing entities)
         // If empty, migrate from entities_db (one-time migration for existing data)
         let entity_name_index =
             Self::load_or_migrate_name_index(&entity_name_index_db, &entities_db)?;
+
+        // Load/migrate lowercase index for O(1) case-insensitive lookup
+        let entity_lowercase_index = Self::load_or_migrate_lowercase_index(
+            &entity_lowercase_index_db,
+            &entity_name_index,
+        )?;
+
         let entity_count = entity_name_index.len();
 
         // Count relationships and episodes during startup (one-time cost)
@@ -424,7 +439,9 @@ impl GraphMemory {
             entity_edges_db,
             entity_episodes_db,
             entity_name_index_db,
+            entity_lowercase_index_db,
             entity_name_index: Arc::new(parking_lot::RwLock::new(entity_name_index)),
+            entity_lowercase_index: Arc::new(parking_lot::RwLock::new(entity_lowercase_index)),
             entity_count: Arc::new(AtomicUsize::new(entity_count)),
             relationship_count: Arc::new(AtomicUsize::new(relationship_count)),
             episode_count: Arc::new(AtomicUsize::new(episode_count)),
@@ -475,6 +492,42 @@ impl GraphMemory {
             if migrated_count > 0 {
                 tracing::info!("Migrated {} entities to name index DB", migrated_count);
             }
+        }
+
+        Ok(index)
+    }
+
+    /// Load lowercase name->UUID index, or migrate from name_index if empty
+    ///
+    /// This enables O(1) case-insensitive entity lookup instead of O(n) linear search.
+    fn load_or_migrate_lowercase_index(
+        lowercase_db: &DB,
+        name_index: &HashMap<String, Uuid>,
+    ) -> Result<HashMap<String, Uuid>> {
+        let mut index = HashMap::new();
+
+        // Try to load from dedicated lowercase index DB
+        let iter = lowercase_db.iterator(rocksdb::IteratorMode::Start);
+        for (key, value) in iter.flatten() {
+            if let (Ok(name), Ok(uuid_bytes)) = (
+                std::str::from_utf8(&key),
+                <[u8; 16]>::try_from(value.as_ref()),
+            ) {
+                index.insert(name.to_string(), Uuid::from_bytes(uuid_bytes));
+            }
+        }
+
+        // If empty but name_index has data, migrate (one-time operation)
+        if index.is_empty() && !name_index.is_empty() {
+            for (name, uuid) in name_index {
+                let lowercase_name = name.to_lowercase();
+                lowercase_db.put(lowercase_name.as_bytes(), uuid.as_bytes())?;
+                index.insert(lowercase_name, *uuid);
+            }
+            tracing::info!(
+                "Migrated {} entities to lowercase index DB",
+                name_index.len()
+            );
         }
 
         Ok(index)
@@ -543,15 +596,23 @@ impl GraphMemory {
         // next add_entity call will detect stale index (above) and recover.
         // This is safer than orphaned entities with no index reference.
 
-        // Update in-memory index first
+        let lowercase_name = entity.name.to_lowercase();
+
+        // Update in-memory indices first
         {
             let mut index = self.entity_name_index.write();
             index.insert(entity.name.clone(), entity.uuid);
         }
+        {
+            let mut lowercase_index = self.entity_lowercase_index.write();
+            lowercase_index.insert(lowercase_name.clone(), entity.uuid);
+        }
 
-        // Persist name->UUID mapping
+        // Persist name->UUID mappings
         self.entity_name_index_db
             .put(entity.name.as_bytes(), entity.uuid.as_bytes())?;
+        self.entity_lowercase_index_db
+            .put(lowercase_name.as_bytes(), entity.uuid.as_bytes())?;
 
         // Now store entity in database
         let key = entity.uuid.as_bytes();
@@ -578,21 +639,25 @@ impl GraphMemory {
         }
     }
 
-    /// Find entity by name (case-insensitive)
+    /// Find entity by name (case-insensitive, O(1) lookup)
+    ///
+    /// Uses a dedicated lowercase index for O(1) case-insensitive matching,
+    /// improving search quality and performance compared to O(n) linear search.
     pub fn find_entity_by_name(&self, name: &str) -> Result<Option<EntityNode>> {
-        let name_lower = name.to_lowercase();
+        // First try exact match for best performance
         let uuid = {
             let index = self.entity_name_index.read();
-            // First try exact match for performance
-            if let Some(uuid) = index.get(name) {
-                Some(*uuid)
-            } else {
-                // Fall back to case-insensitive search
-                index
-                    .iter()
-                    .find(|(k, _)| k.to_lowercase() == name_lower)
-                    .map(|(_, v)| *v)
-            }
+            index.get(name).copied()
+        };
+
+        if let Some(uuid) = uuid {
+            return self.get_entity(&uuid);
+        }
+
+        // O(1) case-insensitive lookup using lowercase index
+        let uuid = {
+            let lowercase_index = self.entity_lowercase_index.read();
+            lowercase_index.get(&name.to_lowercase()).copied()
         };
 
         match uuid {
@@ -1149,7 +1214,6 @@ pub struct GraphStats {
 pub struct ExtractedEntity {
     pub name: String,
     pub label: EntityLabel,
-    pub is_proper_noun: bool,
     pub base_salience: f32,
 }
 
@@ -2005,7 +2069,17 @@ impl EntityExtractor {
     }
 
     /// Calculate base salience for an entity based on its type and detection confidence
-    fn calculate_base_salience(label: &EntityLabel, is_proper_noun: bool) -> f32 {
+    ///
+    /// Salience values by entity type:
+    /// - Person: 0.8 (highest - people are key context)
+    /// - Organization/Product: 0.7
+    /// - Location/Technology/Event: 0.6
+    /// - Skill: 0.5
+    /// - Concept: 0.4
+    /// - Date/Other: 0.3
+    ///
+    /// Proper nouns receive a 20% boost (capped at 1.0).
+    pub fn calculate_base_salience(label: &EntityLabel, is_proper_noun: bool) -> f32 {
         let type_salience = match label {
             EntityLabel::Person => 0.8,       // People are highly salient
             EntityLabel::Organization => 0.7, // Organizations are important
@@ -2082,7 +2156,6 @@ impl EntityExtractor {
                 let entity = ExtractedEntity {
                     name: clean_word.to_string(),
                     label: EntityLabel::Organization,
-                    is_proper_noun: true,
                     base_salience: Self::calculate_base_salience(&EntityLabel::Organization, true),
                 };
                 entities.push(entity);
@@ -2095,7 +2168,6 @@ impl EntityExtractor {
                 let entity = ExtractedEntity {
                     name: clean_word.to_string(),
                     label: EntityLabel::Location,
-                    is_proper_noun: true,
                     base_salience: Self::calculate_base_salience(&EntityLabel::Location, true),
                 };
                 entities.push(entity);
@@ -2108,7 +2180,6 @@ impl EntityExtractor {
                 let entity = ExtractedEntity {
                     name: clean_word.to_string(),
                     label: EntityLabel::Technology,
-                    is_proper_noun: true,
                     base_salience: Self::calculate_base_salience(&EntityLabel::Technology, true),
                 };
                 entities.push(entity);
@@ -2204,7 +2275,6 @@ impl EntityExtractor {
                     let entity = ExtractedEntity {
                         name: entity_name,
                         label: entity_label,
-                        is_proper_noun: is_proper,
                         base_salience,
                     };
                     entities.push(entity);
@@ -2215,18 +2285,206 @@ impl EntityExtractor {
 
         entities
     }
-
-    /// Legacy method for backward compatibility - returns (name, label) tuples
-    pub fn extract(&self, text: &str) -> Vec<(String, EntityLabel)> {
-        self.extract_with_salience(text)
-            .into_iter()
-            .map(|e| (e.name, e.label))
-            .collect()
-    }
 }
 
 impl Default for EntityExtractor {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration;
+
+    /// Create a test relationship edge with specified strength and last_activated
+    fn create_test_edge(strength: f32, days_since_activated: i64) -> RelationshipEdge {
+        RelationshipEdge {
+            uuid: Uuid::new_v4(),
+            from_entity: Uuid::new_v4(),
+            to_entity: Uuid::new_v4(),
+            relation_type: RelationType::RelatedTo,
+            strength,
+            created_at: Utc::now(),
+            valid_at: Utc::now(),
+            invalidated_at: None,
+            source_episode_id: None,
+            context: String::new(),
+            last_activated: Utc::now() - Duration::days(days_since_activated),
+            activation_count: 0,
+            potentiated: false,
+        }
+    }
+
+    #[test]
+    fn test_hebbian_strengthen_increases_strength() {
+        let mut edge = create_test_edge(0.5, 0);
+        let initial_strength = edge.strength;
+
+        edge.strengthen();
+
+        assert!(
+            edge.strength > initial_strength,
+            "Strengthen should increase strength"
+        );
+        assert_eq!(edge.activation_count, 1);
+    }
+
+    #[test]
+    fn test_hebbian_strengthen_asymptotic() {
+        let mut edge = create_test_edge(0.95, 0);
+
+        edge.strengthen();
+
+        // High strength should still increase but slowly (asymptotic to 1.0)
+        assert!(edge.strength > 0.95);
+        assert!(edge.strength <= 1.0);
+    }
+
+    #[test]
+    fn test_hebbian_strengthen_formula() {
+        // Test: w_new = w_old + η × (1 - w_old) where η = 0.1
+        let mut edge = create_test_edge(0.5, 0);
+
+        edge.strengthen();
+
+        // Expected: 0.5 + 0.1 * (1 - 0.5) = 0.5 + 0.05 = 0.55
+        let expected = 0.5 + 0.1 * 0.5;
+        assert!(
+            (edge.strength - expected).abs() < 0.001,
+            "Expected {}, got {}",
+            expected,
+            edge.strength
+        );
+    }
+
+    #[test]
+    fn test_ltp_threshold_potentiation() {
+        let mut edge = create_test_edge(0.5, 0);
+        assert!(!edge.potentiated);
+
+        // Strengthen 10 times (LTP_THRESHOLD = 10)
+        for _ in 0..10 {
+            edge.strengthen();
+        }
+
+        assert!(edge.potentiated, "Should be potentiated after 10 activations");
+        assert!(
+            edge.strength > 0.7,
+            "Potentiated edge should have bonus strength"
+        );
+    }
+
+    #[test]
+    fn test_decay_reduces_strength() {
+        let mut edge = create_test_edge(0.5, 7); // 7 days elapsed
+
+        let initial_strength = edge.strength;
+        edge.decay();
+
+        assert!(
+            edge.strength < initial_strength,
+            "Decay should reduce strength"
+        );
+    }
+
+    #[test]
+    fn test_decay_exponential_formula() {
+        // Test: w(t) = w₀ × e^(-λt) where λ = ln(2) / 14 days
+        let mut edge = create_test_edge(1.0, 14); // 14 days = half-life
+
+        edge.decay();
+
+        // After one half-life, strength should be ~0.5
+        assert!(
+            (edge.strength - 0.5).abs() < 0.05,
+            "After half-life, strength should be ~0.5, got {}",
+            edge.strength
+        );
+    }
+
+    #[test]
+    fn test_decay_minimum_floor() {
+        let mut edge = create_test_edge(0.02, 100); // Very old, very weak
+
+        edge.decay();
+
+        assert!(
+            edge.strength >= LTP_MIN_STRENGTH,
+            "Strength should not go below minimum floor"
+        );
+    }
+
+    #[test]
+    fn test_potentiated_decay_slower() {
+        let mut edge1 = create_test_edge(0.8, 14);
+        let mut edge2 = create_test_edge(0.8, 14);
+        edge2.potentiated = true;
+
+        edge1.decay();
+        edge2.decay();
+
+        assert!(
+            edge2.strength > edge1.strength,
+            "Potentiated edge should decay slower"
+        );
+    }
+
+    #[test]
+    fn test_effective_strength_read_only() {
+        let edge = create_test_edge(0.5, 7);
+        let initial_strength = edge.strength;
+
+        let effective = edge.effective_strength();
+
+        // effective_strength should not modify the edge
+        assert_eq!(edge.strength, initial_strength);
+        assert!(effective < initial_strength);
+    }
+
+    #[test]
+    fn test_decay_prune_threshold() {
+        let mut weak_edge = create_test_edge(LTP_MIN_STRENGTH, 30);
+        weak_edge.potentiated = false;
+
+        let should_prune = weak_edge.decay();
+
+        // Non-potentiated edge at minimum strength after decay should be prunable
+        assert!(
+            should_prune,
+            "Weak non-potentiated edge should be marked for pruning"
+        );
+    }
+
+    #[test]
+    fn test_potentiated_never_pruned() {
+        let mut edge = create_test_edge(LTP_MIN_STRENGTH, 100);
+        edge.potentiated = true;
+
+        let should_prune = edge.decay();
+
+        assert!(
+            !should_prune,
+            "Potentiated edges should never be pruned regardless of strength"
+        );
+    }
+
+    #[test]
+    fn test_salience_calculation() {
+        let person_salience =
+            EntityExtractor::calculate_base_salience(&EntityLabel::Person, false);
+        let person_proper_salience =
+            EntityExtractor::calculate_base_salience(&EntityLabel::Person, true);
+
+        assert_eq!(person_salience, 0.8);
+        assert!((person_proper_salience - 0.96).abs() < 0.01); // 0.8 * 1.2 = 0.96
+    }
+
+    #[test]
+    fn test_salience_caps_at_one() {
+        // Person (0.8) * 1.2 = 0.96, should not exceed 1.0
+        let salience = EntityExtractor::calculate_base_salience(&EntityLabel::Person, true);
+        assert!(salience <= 1.0);
     }
 }

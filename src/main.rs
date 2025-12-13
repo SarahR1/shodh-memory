@@ -5855,24 +5855,9 @@ async fn add_entity(
         .map(|c| c.is_uppercase())
         .unwrap_or(false);
 
-    // Calculate base salience based on entity type and proper noun status
-    let type_salience = match &entity_label {
-        graph_memory::EntityLabel::Person => 0.8,
-        graph_memory::EntityLabel::Organization => 0.7,
-        graph_memory::EntityLabel::Location => 0.6,
-        graph_memory::EntityLabel::Technology => 0.6,
-        graph_memory::EntityLabel::Product => 0.7,
-        graph_memory::EntityLabel::Event => 0.6,
-        graph_memory::EntityLabel::Skill => 0.5,
-        graph_memory::EntityLabel::Concept => 0.4,
-        graph_memory::EntityLabel::Date => 0.3,
-        graph_memory::EntityLabel::Other(_) => 0.3,
-    };
-    let salience = if is_proper_noun {
-        (type_salience * 1.2_f32).min(1.0_f32)
-    } else {
-        type_salience
-    };
+    // Calculate base salience using centralized logic
+    let salience =
+        graph_memory::EntityExtractor::calculate_base_salience(&entity_label, is_proper_noun);
 
     let entity = graph_memory::EntityNode {
         uuid: uuid::Uuid::new_v4(),
