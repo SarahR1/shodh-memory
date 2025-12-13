@@ -9,15 +9,15 @@
 //!
 //! Compare against industry standards (Neo4j, Memgraph, etc.)
 
-use chrono::Utc;
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion};
+use shodh_memory::chrono::Utc;
 use shodh_memory::embeddings::ner::{NerConfig, NerEntityType, NeuralNer};
 use shodh_memory::graph_memory::{
     EntityLabel, EntityNode, GraphMemory, RelationType, RelationshipEdge,
 };
+use shodh_memory::uuid::Uuid;
 use std::collections::HashMap;
 use tempfile::TempDir;
-use uuid::Uuid;
 
 /// Create fallback NER instance for testing
 fn setup_fallback_ner() -> NeuralNer {
