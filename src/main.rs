@@ -1050,13 +1050,14 @@ struct UpsertResponse {
 #[derive(Debug, Deserialize)]
 struct MemoryHistoryRequest {
     user_id: String,
-    memory_id: String,
+    #[serde(alias = "memory_id")]
+    id: String,
 }
 
 /// Response with memory revision history
 #[derive(Debug, Serialize)]
 struct MemoryHistoryResponse {
-    memory_id: String,
+    id: String,
     external_id: Option<String>,
     current_content: String,
     version: u32,
@@ -1089,7 +1090,7 @@ struct TrackedRetrieveRequest {
 #[derive(Debug, Serialize)]
 struct TrackedRetrieveResponse {
     tracking_id: String,
-    memory_ids: Vec<String>,
+    ids: Vec<String>,
     memories: Vec<RecallMemory>,
 }
 
@@ -1097,7 +1098,8 @@ struct TrackedRetrieveResponse {
 #[derive(Debug, Deserialize)]
 struct ReinforceFeedbackRequest {
     user_id: String,
-    memory_ids: Vec<String>,
+    #[serde(alias = "memory_ids")]
+    ids: Vec<String>,
     /// "helpful", "misleading", or "neutral"
     outcome: String,
 }
@@ -1943,7 +1945,7 @@ async fn upsert_memory(
 ///   "user_id": "agent-1",
 ///   "memory_id": "uuid-here"
 /// }
-#[tracing::instrument(skip(state), fields(user_id = %req.user_id, memory_id = %req.memory_id))]
+#[tracing::instrument(skip(state), fields(user_id = %req.user_id, id = %req.id))]
 async fn get_memory_history(
     State(state): State<AppState>,
     Json(req): Json<MemoryHistoryRequest>,
@@ -1951,7 +1953,7 @@ async fn get_memory_history(
     validation::validate_user_id(&req.user_id).map_validation_err("user_id")?;
 
     // Parse memory ID
-    let memory_id = uuid::Uuid::parse_str(&req.memory_id)
+    let memory_id = uuid::Uuid::parse_str(&req.id)
         .map_err(|e| AppError::InvalidMemoryId(format!("Invalid UUID: {e}")))
         .map(memory::types::MemoryId)?;
 
@@ -1987,7 +1989,7 @@ async fn get_memory_history(
         .collect();
 
     Ok(Json(MemoryHistoryResponse {
-        memory_id: memory.id.0.to_string(),
+        id: memory.id.0.to_string(),
         external_id: memory.external_id,
         current_content: memory.experience.content,
         version: memory.version,
@@ -3649,7 +3651,7 @@ async fn recall_tracked(
 
     Ok(Json(TrackedRetrieveResponse {
         tracking_id,
-        memory_ids,
+        ids: memory_ids,
         memories: recall_memories,
     }))
 }
@@ -3661,7 +3663,7 @@ async fn recall_tracked(
 /// - "helpful": Memories that helped → boost importance, strengthen associations
 /// - "misleading": Memories that misled → reduce importance, don't strengthen
 /// - "neutral": Just record access, mild strengthening
-#[tracing::instrument(skip(state), fields(user_id = %req.user_id, outcome = %req.outcome, count = req.memory_ids.len()))]
+#[tracing::instrument(skip(state), fields(user_id = %req.user_id, outcome = %req.outcome, count = req.ids.len()))]
 async fn reinforce_feedback(
     State(state): State<AppState>,
     Json(req): Json<ReinforceFeedbackRequest>,
@@ -3670,7 +3672,7 @@ async fn reinforce_feedback(
 
     validation::validate_user_id(&req.user_id).map_validation_err("user_id")?;
 
-    if req.memory_ids.is_empty() {
+    if req.ids.is_empty() {
         return Ok(Json(ReinforceFeedbackResponse {
             memories_processed: 0,
             associations_strengthened: 0,
@@ -3689,7 +3691,7 @@ async fn reinforce_feedback(
 
     // Convert string IDs to MemoryId
     let memory_ids: Vec<crate::memory::MemoryId> = req
-        .memory_ids
+        .ids
         .iter()
         .filter_map(|id| uuid::Uuid::parse_str(id).ok())
         .map(crate::memory::MemoryId)
@@ -3697,7 +3699,7 @@ async fn reinforce_feedback(
 
     if memory_ids.is_empty() {
         return Err(AppError::InvalidInput {
-            field: "memory_ids".to_string(),
+            field: "ids".to_string(),
             reason: "No valid UUIDs provided".to_string(),
         });
     }
@@ -4182,7 +4184,8 @@ async fn get_all_memories(
 #[derive(Debug, Deserialize)]
 struct HistoryRequest {
     user_id: String,
-    memory_id: Option<String>,
+    #[serde(alias = "memory_id")]
+    id: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -4194,7 +4197,7 @@ struct HistoryResponse {
 struct HistoryEvent {
     timestamp: String, // ISO 8601 format
     event_type: String,
-    memory_id: String,
+    id: String,
     details: String,
 }
 
@@ -4208,9 +4211,9 @@ async fn get_history(
     let events = {
         let state = state.clone();
         let user_id = req.user_id.clone();
-        let memory_id = req.memory_id.clone();
+        let id = req.id.clone();
 
-        tokio::task::spawn_blocking(move || state.get_history(&user_id, memory_id.as_deref()))
+        tokio::task::spawn_blocking(move || state.get_history(&user_id, id.as_deref()))
             .await
             .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
     };
@@ -4220,7 +4223,7 @@ async fn get_history(
         .map(|e| HistoryEvent {
             timestamp: e.timestamp.to_rfc3339(),
             event_type: e.event_type.clone(),
-            memory_id: e.memory_id.clone(),
+            id: e.memory_id.clone(),
             details: e.details.clone(),
         })
         .collect();
@@ -4235,7 +4238,8 @@ async fn get_history(
 #[derive(Debug, Deserialize)]
 struct CompressMemoryRequest {
     user_id: String,
-    memory_id: String,
+    #[serde(alias = "memory_id")]
+    id: String,
 }
 
 /// Manually compress a specific memory
@@ -4249,10 +4253,9 @@ async fn compress_memory(
         .get_user_memory(&req.user_id)
         .map_err(AppError::Internal)?;
 
-    // Validate memory_id format
+    // Validate id format
     let _memory_id = MemoryId(
-        uuid::Uuid::parse_str(&req.memory_id)
-            .map_err(|_| AppError::InvalidMemoryId(req.memory_id.clone()))?,
+        uuid::Uuid::parse_str(&req.id).map_err(|_| AppError::InvalidMemoryId(req.id.clone()))?,
     );
 
     // Compression happens automatically in the memory system based on age and importance
@@ -4489,7 +4492,8 @@ async fn traverse_graph(
 #[derive(Debug, Deserialize)]
 struct DecompressMemoryRequest {
     user_id: String,
-    memory_id: String,
+    #[serde(alias = "memory_id")]
+    id: String,
 }
 
 async fn decompress_memory(
@@ -4504,8 +4508,7 @@ async fn decompress_memory(
 
     let memory_guard = memory_sys.read();
     let memory_id = MemoryId(
-        uuid::Uuid::parse_str(&req.memory_id)
-            .map_err(|_| AppError::InvalidMemoryId(req.memory_id.clone()))?,
+        uuid::Uuid::parse_str(&req.id).map_err(|_| AppError::InvalidMemoryId(req.id.clone()))?,
     );
 
     // Get the memory

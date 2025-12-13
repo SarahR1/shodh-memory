@@ -487,12 +487,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
         inputSchema: {
           type: "object",
           properties: {
-            memory_id: {
+            id: {
               type: "string",
               description: "The ID of the memory to delete",
             },
           },
-          required: ["memory_id"],
+          required: ["id"],
         },
       },
       {
@@ -952,15 +952,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "forget": {
-        const { memory_id } = args as { memory_id: string };
+        const { id } = args as { id: string };
 
-        await apiCall(`/api/memory/${memory_id}?user_id=${USER_ID}`, "DELETE");
+        await apiCall(`/api/memory/${id}?user_id=${USER_ID}`, "DELETE");
 
         return {
           content: [
             {
               type: "text",
-              text: `Deleted memory: ${memory_id}`,
+              text: `Deleted memory: ${id}`,
             },
           ],
         };
