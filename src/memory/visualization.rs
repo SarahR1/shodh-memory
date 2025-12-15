@@ -419,6 +419,7 @@ mod tests {
             None, // agent_id
             None, // run_id
             None, // actor_id
+            None, // created_at
         )
     }
 

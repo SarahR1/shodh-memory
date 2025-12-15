@@ -47,6 +47,7 @@ fn test_memory_new_defaults() {
         None,
         None,
         None,
+        None,
     );
 
     assert_eq!(memory.tier, MemoryTier::Working);
@@ -69,6 +70,7 @@ fn test_memory_new_with_all_params() {
         Some("agent-1".to_string()),
         Some("run-1".to_string()),
         Some("actor-1".to_string()),
+        None, // created_at
     );
 
     assert_eq!(memory.id.0, id);
@@ -92,6 +94,7 @@ fn test_add_entity_ref() {
         None,
         None,
         None,
+        None,
     );
 
     let entity_id = Uuid::new_v4();
@@ -109,6 +112,7 @@ fn test_add_entity_ref_no_duplicates() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -135,6 +139,7 @@ fn test_add_multiple_entity_refs() {
         None,
         None,
         None,
+        None,
     );
 
     let entity1 = Uuid::new_v4();
@@ -154,6 +159,7 @@ fn test_entity_ids() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -190,6 +196,7 @@ fn test_memory_tier_promotion() {
         None,
         None,
         None,
+        None,
     );
 
     assert_eq!(memory.tier, MemoryTier::Working);
@@ -213,6 +220,7 @@ fn test_memory_tier_demotion() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -240,6 +248,7 @@ fn test_tier_cycle() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -271,6 +280,7 @@ fn test_activation_default() {
         None,
         None,
         None,
+        None,
     );
 
     assert!(
@@ -288,6 +298,7 @@ fn test_activate_increases() {
         None,
         None,
         None,
+        None,
     );
 
     memory.set_activation(0.5);
@@ -302,6 +313,7 @@ fn test_activate_capped_at_one() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -325,6 +337,7 @@ fn test_decay_activation() {
         None,
         None,
         None,
+        None,
     );
 
     memory.set_activation(1.0);
@@ -339,6 +352,7 @@ fn test_decay_activation_multiple() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -361,6 +375,7 @@ fn test_decay_activation_approaches_zero() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -388,6 +403,7 @@ fn test_activate_then_decay() {
         None,
         None,
         None,
+        None,
     );
 
     memory.set_activation(0.5);
@@ -410,6 +426,7 @@ fn test_mark_retrieved() {
         None,
         None,
         None,
+        None,
     );
 
     assert!(memory.last_retrieval_id.is_none());
@@ -429,6 +446,7 @@ fn test_mark_retrieved_updates_access() {
         None,
         None,
         None,
+        None,
     );
 
     let initial_access = memory.access_count();
@@ -444,6 +462,7 @@ fn test_mark_retrieved_multiple() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -476,6 +495,7 @@ fn test_importance_getter() {
         None,
         None,
         None,
+        None,
     );
 
     assert!((memory.importance() - 0.75).abs() < f32::EPSILON);
@@ -487,6 +507,7 @@ fn test_importance_update() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -502,6 +523,7 @@ fn test_importance_clamped() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -529,6 +551,7 @@ fn test_boost_importance() {
         None,
         None,
         None,
+        None,
     );
 
     memory.boost_importance(0.2);
@@ -541,6 +564,7 @@ fn test_decay_importance() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -565,6 +589,7 @@ fn test_access_count_initial() {
         None,
         None,
         None,
+        None,
     );
 
     assert_eq!(memory.access_count(), 0);
@@ -576,6 +601,7 @@ fn test_record_access() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -594,6 +620,7 @@ fn test_record_access_many() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -622,6 +649,7 @@ fn test_bincode_roundtrip_basic() {
         None,
         None,
         None,
+        None,
     );
 
     let serialized = bincode::serialize(&memory).expect("Failed to serialize");
@@ -638,6 +666,7 @@ fn test_bincode_roundtrip_with_entity_refs() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -665,6 +694,7 @@ fn test_bincode_roundtrip_with_tier() {
         None,
         None,
         None,
+        None,
     );
 
     memory.tier = MemoryTier::LongTerm;
@@ -684,6 +714,7 @@ fn test_bincode_roundtrip_with_activation() {
         None,
         None,
         None,
+        None,
     );
 
     memory.set_activation(0.42);
@@ -700,6 +731,7 @@ fn test_bincode_roundtrip_with_retrieval_id() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -728,6 +760,7 @@ fn test_bincode_roundtrip_full() {
         Some("agent-1".to_string()),
         Some("run-1".to_string()),
         Some("actor-1".to_string()),
+        None, // created_at
     );
 
     let entity1 = Uuid::new_v4();
@@ -772,6 +805,7 @@ fn test_json_roundtrip() {
         None,
         None,
         None,
+        None,
     );
 
     let json = serde_json::to_string(&memory).expect("Failed to serialize JSON");
@@ -797,6 +831,7 @@ fn test_empty_content() {
         None,
         None,
         None,
+        None,
     );
 
     assert!(memory.experience.content.is_empty());
@@ -816,6 +851,7 @@ fn test_very_long_content() {
             ..Default::default()
         },
         0.5,
+        None,
         None,
         None,
         None,
@@ -841,6 +877,7 @@ fn test_unicode_content() {
         None,
         None,
         None,
+        None,
     );
 
     let serialized = bincode::serialize(&memory).expect("Failed to serialize");
@@ -854,6 +891,7 @@ fn test_many_entity_refs() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -883,6 +921,7 @@ fn test_zero_importance() {
         None,
         None,
         None,
+        None,
     );
 
     assert!((memory.importance() - 0.0).abs() < f32::EPSILON);
@@ -897,6 +936,7 @@ fn test_max_importance() {
         None,
         None,
         None,
+        None,
     );
 
     assert!((memory.importance() - 1.0).abs() < f32::EPSILON);
@@ -908,6 +948,7 @@ fn test_zero_activation() {
         MemoryId(Uuid::new_v4()),
         Experience::default(),
         0.5,
+        None,
         None,
         None,
         None,
@@ -935,6 +976,7 @@ fn test_concurrent_access_count() {
         None,
         None,
         None,
+        None, // created_at
     ));
 
     let mut handles = vec![];
@@ -965,6 +1007,7 @@ fn test_clone_independence() {
             ..Default::default()
         },
         0.5,
+        None,
         None,
         None,
         None,

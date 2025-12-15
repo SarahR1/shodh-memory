@@ -462,7 +462,7 @@ impl PyMemorySystem {
 
         let memory_id = self
             .inner
-            .record(experience)
+            .record(experience, None)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to record memory: {}", e)))?;
 
         Ok(memory_id.0.to_string())

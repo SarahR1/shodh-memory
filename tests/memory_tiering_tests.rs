@@ -74,16 +74,16 @@ fn test_working_memory_stores_recent() {
 
     // Record some experiences
     let id1 = memory_system
-        .record(create_experience(
-            "First memory",
-            ExperienceType::Observation,
-        ))
+        .record(
+            create_experience("First memory", ExperienceType::Observation),
+            None,
+        )
         .expect("Failed to record");
     let id2 = memory_system
-        .record(create_experience(
-            "Second memory",
-            ExperienceType::Observation,
-        ))
+        .record(
+            create_experience("Second memory", ExperienceType::Observation),
+            None,
+        )
         .expect("Failed to record");
 
     // Retrieve all
@@ -105,10 +105,10 @@ fn test_working_memory_lru_eviction() {
     // Record more than capacity
     for i in 0..10 {
         memory_system
-            .record(create_experience(
-                &format!("Memory number {}", i),
-                ExperienceType::Observation,
-            ))
+            .record(
+                create_experience(&format!("Memory number {}", i), ExperienceType::Observation),
+                None,
+            )
             .expect("Failed to record");
     }
 
@@ -141,7 +141,7 @@ fn test_session_memory_promotion() {
     };
 
     memory_system
-        .record(high_importance)
+        .record(high_importance, None)
         .expect("Failed to record important memory");
 
     // Stats should show promotion activity
@@ -164,7 +164,7 @@ fn test_low_importance_stays_working() {
     };
 
     memory_system
-        .record(low_importance)
+        .record(low_importance, None)
         .expect("Failed to record low importance memory");
 
     // Low importance should still be retrievable
@@ -203,6 +203,7 @@ fn test_longterm_persistence() {
             None,
             None,
             None,
+            None, // created_at
         );
 
         let serialized =
@@ -241,22 +242,28 @@ fn test_longterm_persistence() {
 
         // Record important memory that should be persisted
         memory_system
-            .record(Experience {
-                content: content.to_string(),
-                experience_type: ExperienceType::Decision,
-                entities: vec!["persistence".to_string(), "storage".to_string()],
-                ..Default::default()
-            })
+            .record(
+                Experience {
+                    content: content.to_string(),
+                    experience_type: ExperienceType::Decision,
+                    entities: vec!["persistence".to_string(), "storage".to_string()],
+                    ..Default::default()
+                },
+                None,
+            )
             .expect("Failed to record");
 
         // Add more memories to trigger eviction from working memory
         for i in 0..5 {
             memory_system
-                .record(Experience {
-                    content: format!("Filler memory {} to trigger eviction", i),
-                    experience_type: ExperienceType::Observation,
-                    ..Default::default()
-                })
+                .record(
+                    Experience {
+                        content: format!("Filler memory {} to trigger eviction", i),
+                        experience_type: ExperienceType::Observation,
+                        ..Default::default()
+                    },
+                    None,
+                )
                 .expect("Failed to record filler");
         }
 
@@ -352,10 +359,13 @@ fn test_multi_tier_retrieval() {
         };
 
         memory_system
-            .record(create_experience(
-                &format!("Test memory entry number {} for multi-tier testing", i),
-                importance,
-            ))
+            .record(
+                create_experience(
+                    &format!("Test memory entry number {} for multi-tier testing", i),
+                    importance,
+                ),
+                None,
+            )
             .expect("Failed to record");
     }
 
@@ -396,8 +406,12 @@ fn test_importance_affects_tiering() {
         ..Default::default()
     };
 
-    memory_system.record(high).expect("Failed to record high");
-    memory_system.record(low).expect("Failed to record low");
+    memory_system
+        .record(high, None)
+        .expect("Failed to record high");
+    memory_system
+        .record(low, None)
+        .expect("Failed to record low");
 
     // Both should be retrievable
     let stats = memory_system.stats();
@@ -421,7 +435,7 @@ fn test_forget_low_importance() {
         };
 
         memory_system
-            .record(create_experience(&format!("Memory {}", i), exp_type))
+            .record(create_experience(&format!("Memory {}", i), exp_type), None)
             .expect("Failed to record");
     }
 
@@ -446,17 +460,20 @@ fn test_forget_by_pattern() {
 
     // Record memories with distinct patterns
     memory_system
-        .record(create_experience(
-            "DELETEME: This should be forgotten",
-            ExperienceType::Observation,
-        ))
+        .record(
+            create_experience(
+                "DELETEME: This should be forgotten",
+                ExperienceType::Observation,
+            ),
+            None,
+        )
         .expect("Failed to record");
 
     memory_system
-        .record(create_experience(
-            "KEEP: This should remain",
-            ExperienceType::Observation,
-        ))
+        .record(
+            create_experience("KEEP: This should remain", ExperienceType::Observation),
+            None,
+        )
         .expect("Failed to record");
 
     // Forget by pattern
@@ -494,17 +511,23 @@ fn test_similarity_retrieval() {
 
     // Record semantically similar memories
     memory_system
-        .record(create_experience(
-            "The robot navigated through the warehouse avoiding obstacles",
-            ExperienceType::Observation,
-        ))
+        .record(
+            create_experience(
+                "The robot navigated through the warehouse avoiding obstacles",
+                ExperienceType::Observation,
+            ),
+            None,
+        )
         .expect("Failed");
 
     memory_system
-        .record(create_experience(
-            "Drone flew over the factory detecting anomalies",
-            ExperienceType::Observation,
-        ))
+        .record(
+            create_experience(
+                "Drone flew over the factory detecting anomalies",
+                ExperienceType::Observation,
+            ),
+            None,
+        )
         .expect("Failed");
 
     // Search semantically similar
@@ -530,17 +553,23 @@ fn test_hybrid_retrieval() {
 
     // Record memories
     memory_system
-        .record(create_experience(
-            "Mission alpha: drone successfully completed reconnaissance",
-            ExperienceType::Task,
-        ))
+        .record(
+            create_experience(
+                "Mission alpha: drone successfully completed reconnaissance",
+                ExperienceType::Task,
+            ),
+            None,
+        )
         .expect("Failed");
 
     memory_system
-        .record(create_experience(
-            "Mission beta: robot failed to reach waypoint due to obstacle",
-            ExperienceType::Error,
-        ))
+        .record(
+            create_experience(
+                "Mission beta: robot failed to reach waypoint due to obstacle",
+                ExperienceType::Error,
+            ),
+            None,
+        )
         .expect("Failed");
 
     // Hybrid search
@@ -582,8 +611,8 @@ fn test_geo_filter_retrieval() {
         ..Default::default()
     };
 
-    memory_system.record(geo_memory).expect("Failed");
-    memory_system.record(far_memory).expect("Failed");
+    memory_system.record(geo_memory, None).expect("Failed");
+    memory_system.record(far_memory, None).expect("Failed");
 
     // Search near San Francisco
     let query = Query {
@@ -625,8 +654,8 @@ fn test_mission_filter_retrieval() {
         ..Default::default()
     };
 
-    memory_system.record(mission_a).expect("Failed");
-    memory_system.record(mission_b).expect("Failed");
+    memory_system.record(mission_a, None).expect("Failed");
+    memory_system.record(mission_b, None).expect("Failed");
 
     // Search specific mission - should only return mission_alpha results
     let query = Query {
@@ -681,10 +710,13 @@ fn test_high_volume_recording() {
     // Record 100 memories quickly
     for i in 0..100 {
         memory_system
-            .record(create_experience(
-                &format!("High volume test memory number {}", i),
-                ExperienceType::Observation,
-            ))
+            .record(
+                create_experience(
+                    &format!("High volume test memory number {}", i),
+                    ExperienceType::Observation,
+                ),
+                None,
+            )
             .expect("Failed to record");
     }
 
@@ -703,10 +735,13 @@ fn test_concurrent_access_pattern() {
     for i in 0..20 {
         // Write
         memory_system
-            .record(create_experience(
-                &format!("Concurrent pattern test {}", i),
-                ExperienceType::Observation,
-            ))
+            .record(
+                create_experience(
+                    &format!("Concurrent pattern test {}", i),
+                    ExperienceType::Observation,
+                ),
+                None,
+            )
             .expect("Failed to record");
 
         // Read immediately

@@ -56,7 +56,7 @@ fn populate_memories(memory: &mut MemorySystem, count: usize) {
             entities: entity_names,
             ..Default::default()
         };
-        memory.record(exp).expect("Failed to record");
+        memory.record(exp, None).expect("Failed to record");
     }
 }
 

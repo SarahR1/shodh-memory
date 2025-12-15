@@ -237,7 +237,7 @@ fn test_core_memory_operations() {
         ..Default::default()
     };
 
-    let record_result = system.record(experience);
+    let record_result = system.record(experience, None);
     let record_duration = start.elapsed().as_millis();
 
     match record_result {
@@ -268,7 +268,7 @@ fn test_core_memory_operations() {
             "robot_001",
             vec!["sensor", "waypoint"],
         );
-        if system.record(exp).is_ok() {
+        if system.record(exp, None).is_ok() {
             success_count += 1;
         }
     }
@@ -404,7 +404,7 @@ fn test_robotics_scenarios() {
                 mission_id: Some(mission_id.to_string()),
                 ..Default::default()
             };
-            if system.record(exp).is_err() {
+            if system.record(exp, None).is_err() {
                 mission_success = false;
             }
         }
@@ -473,7 +473,7 @@ fn test_robotics_scenarios() {
             action_type: Some("obstacle_detection".to_string()),
             ..Default::default()
         };
-        if system.record(exp).is_ok() {
+        if system.record(exp, None).is_ok() {
             obstacle_count += 1;
         }
     }
@@ -549,7 +549,7 @@ fn test_robotics_scenarios() {
             sensor_data,
             ..Default::default()
         };
-        if system.record(exp).is_err() {
+        if system.record(exp, None).is_err() {
             calibration_success = false;
         }
     }
@@ -629,7 +629,7 @@ fn test_drone_fleet_operations() {
             Some([lat, lon, 100.0]),
             Some("surveillance"),
         );
-        if system.record(exp).is_ok() {
+        if system.record(exp, None).is_ok() {
             success_count += 1;
         }
     }
@@ -667,7 +667,7 @@ fn test_drone_fleet_operations() {
             Some([lat, lon, alt]),
             Some("observation"),
         );
-        if system.record(exp).is_ok() {
+        if system.record(exp, None).is_ok() {
             geo_success += 1;
         }
     }
@@ -742,7 +742,7 @@ fn test_drone_fleet_operations() {
             reward: Some(1.0),
             ..Default::default()
         };
-        if system.record(exp).is_ok() {
+        if system.record(exp, None).is_ok() {
             path_success += 1;
         }
     }
@@ -818,7 +818,7 @@ fn test_drone_fleet_operations() {
             sensor_data,
             ..Default::default()
         };
-        if system.record(exp).is_ok() {
+        if system.record(exp, None).is_ok() {
             battery_success += 1;
         }
     }
@@ -891,7 +891,7 @@ fn test_performance_benchmarks() {
                 &format!("perf_robot_{}", i % 5),
                 vec!["performance", "benchmark", "sensor"],
             );
-            if system.record(exp).is_ok() {
+            if system.record(exp, None).is_ok() {
                 success += 1;
             }
         }
@@ -997,7 +997,7 @@ fn test_reliability_and_edge_cases() {
         ..Default::default()
     };
 
-    let empty_result = system.record(exp);
+    let empty_result = system.record(exp, None);
     let empty_duration = start.elapsed().as_millis();
 
     // Empty content should still be handled gracefully
@@ -1016,7 +1016,7 @@ fn test_reliability_and_edge_cases() {
         ..Default::default()
     };
 
-    let long_result = system.record(exp);
+    let long_result = system.record(exp, None);
     let long_duration = start.elapsed().as_millis();
 
     reporter.record(
@@ -1035,7 +1035,7 @@ fn test_reliability_and_edge_cases() {
         ..Default::default()
     };
 
-    let special_result = system.record(exp);
+    let special_result = system.record(exp, None);
     let special_duration = start.elapsed().as_millis();
 
     reporter.record(
@@ -1109,7 +1109,7 @@ fn test_reliability_and_edge_cases() {
                 "robot_concurrent",
                 vec!["concurrent"],
             );
-            if system.record(exp).is_ok() {
+            if system.record(exp, None).is_ok() {
                 ops_success += 1;
             }
         } else {
@@ -1174,7 +1174,7 @@ fn test_stress_scenarios() {
             &format!("stress_robot_{}", i % 10),
             vec!["stress", "high_volume", "sensor"],
         );
-        if system.record(exp).is_ok() {
+        if system.record(exp, None).is_ok() {
             success += 1;
         }
     }

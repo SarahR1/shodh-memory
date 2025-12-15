@@ -192,7 +192,12 @@ impl MemorySystem {
 
     /// Record a new experience (takes ownership to avoid clones)
     /// Thread-safe: uses interior mutability for all internal state
-    pub fn record(&self, mut experience: Experience) -> Result<MemoryId> {
+    /// If `created_at` is None, uses current time (Utc::now())
+    pub fn record(
+        &self,
+        mut experience: Experience,
+        created_at: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<MemoryId> {
         // CRITICAL: Check resource limits before recording to prevent OOM
         self.check_resource_limits()?;
 
@@ -234,9 +239,10 @@ impl MemorySystem {
             memory_id.clone(),
             experience, // Move ownership (zero-cost)
             importance,
-            None, // agent_id
-            None, // run_id
-            None, // actor_id
+            None,       // agent_id
+            None,       // run_id
+            None,       // actor_id
+            created_at, // Use provided timestamp or Utc::now() if None
         ));
 
         // CRITICAL: Persist to RocksDB storage FIRST (before indexing/in-memory tiers)
@@ -2113,6 +2119,7 @@ impl MemorySystem {
                 None, // agent_id
                 None, // run_id
                 None, // actor_id
+                None, // created_at
             ));
 
             // Persist to storage

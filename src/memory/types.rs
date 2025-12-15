@@ -717,6 +717,7 @@ impl Clone for Memory {
 
 impl Memory {
     /// Create new memory with given parameters
+    /// If `created_at` is None, uses current time (Utc::now())
     pub fn new(
         id: MemoryId,
         experience: Experience,
@@ -724,8 +725,9 @@ impl Memory {
         agent_id: Option<String>,
         run_id: Option<String>,
         actor_id: Option<String>,
+        created_at: Option<DateTime<Utc>>,
     ) -> Self {
-        let now = Utc::now();
+        let now = created_at.unwrap_or_else(Utc::now);
         Self {
             id,
             experience,
@@ -763,8 +765,11 @@ impl Memory {
         agent_id: Option<String>,
         run_id: Option<String>,
         actor_id: Option<String>,
+        created_at: Option<DateTime<Utc>>,
     ) -> Self {
-        let mut memory = Self::new(id, experience, importance, agent_id, run_id, actor_id);
+        let mut memory = Self::new(
+            id, experience, importance, agent_id, run_id, actor_id, created_at,
+        );
         memory.external_id = Some(external_id);
         memory
     }

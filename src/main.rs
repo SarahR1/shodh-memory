@@ -925,6 +925,10 @@ struct RememberRequest {
     /// When provided with upsert, existing memory with same external_id will be updated
     #[serde(default)]
     external_id: Option<String>,
+    /// Optional timestamp for the memory. If not provided, uses current time.
+    /// Use ISO 8601 format (e.g., "2025-12-15T06:30:00Z")
+    #[serde(default)]
+    created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// Simplified remember response
@@ -1636,7 +1640,7 @@ async fn record_experience(
 
         tokio::task::spawn_blocking(move || {
             let memory_guard = memory.read();
-            memory_guard.record(experience)
+            memory_guard.record(experience, None)
         })
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
@@ -1757,9 +1761,10 @@ async fn remember(
     let memory_id = {
         let memory = memory.clone();
         let exp_clone = experience.clone();
+        let created_at = req.created_at;
         tokio::task::spawn_blocking(move || {
             let memory_guard = memory.read();
-            memory_guard.record(exp_clone)
+            memory_guard.record(exp_clone, created_at)
         })
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
@@ -3883,7 +3888,7 @@ async fn batch_remember(
                     ..Default::default()
                 };
 
-                match memory_guard.record(experience) {
+                match memory_guard.record(experience, None) {
                     Ok(id) => ids.push(id.0.to_string()),
                     Err(_) => errors += 1,
                 }
@@ -4054,7 +4059,7 @@ async fn update_memory(
     // Re-record (will update in storage)
     let experience = current_memory.experience.clone();
     memory_guard
-        .record(experience)
+        .record(experience, None) // None preserves original created_at behavior for updates
         .map_err(AppError::Internal)?;
 
     // Enterprise audit logging
@@ -5055,7 +5060,7 @@ async fn patch_memory(
     // Re-record (will update in storage and re-index)
     let experience = current_memory.experience.clone();
     memory_guard
-        .record(experience)
+        .record(experience, None) // None preserves original created_at behavior for patches
         .map_err(AppError::Internal)?;
 
     state.log_event(

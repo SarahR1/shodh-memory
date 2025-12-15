@@ -67,10 +67,13 @@ fn test_retrieve_returns_memories() {
 
     // Record some memories
     memory
-        .record(create_experience("Robot detected obstacle at entrance"))
+        .record(
+            create_experience("Robot detected obstacle at entrance"),
+            None,
+        )
         .unwrap();
     memory
-        .record(create_experience("Drone completed patrol route"))
+        .record(create_experience("Drone completed patrol route"), None)
         .unwrap();
 
     // Retrieve
@@ -91,10 +94,10 @@ fn test_retrieve_multiple_related() {
     // Record related memories
     for i in 0..10 {
         memory
-            .record(create_experience(&format!(
-                "Warehouse section {} inventory check complete",
-                i
-            )))
+            .record(
+                create_experience(&format!("Warehouse section {} inventory check complete", i)),
+                None,
+            )
             .unwrap();
     }
 
@@ -118,9 +121,10 @@ fn test_reinforce_helpful_boosts_importance() {
 
     // Record memory
     let id = memory
-        .record(create_experience(
-            "Critical safety procedure: always check battery before flight",
-        ))
+        .record(
+            create_experience("Critical safety procedure: always check battery before flight"),
+            None,
+        )
         .unwrap();
 
     // Get initial importance
@@ -152,11 +156,14 @@ fn test_reinforce_misleading_decays_importance() {
 
     // Record memory with high importance
     let id = memory
-        .record(Experience {
-            content: "Outdated procedure that no longer applies".to_string(),
-            experience_type: ExperienceType::Decision,
-            ..Default::default()
-        })
+        .record(
+            Experience {
+                content: "Outdated procedure that no longer applies".to_string(),
+                experience_type: ExperienceType::Decision,
+                ..Default::default()
+            },
+            None,
+        )
         .unwrap();
 
     // Get initial importance
@@ -188,7 +195,10 @@ fn test_reinforce_neutral_no_change() {
 
     // Record memory
     let id = memory
-        .record(create_experience("General observation about warehouse"))
+        .record(
+            create_experience("General observation about warehouse"),
+            None,
+        )
         .unwrap();
 
     // Get initial importance
@@ -216,14 +226,16 @@ fn test_co_retrieval_strengthens_association() {
 
     // Record related memories
     let id1 = memory
-        .record(create_experience(
-            "Battery level monitoring is critical for drone safety",
-        ))
+        .record(
+            create_experience("Battery level monitoring is critical for drone safety"),
+            None,
+        )
         .unwrap();
     let id2 = memory
-        .record(create_experience(
-            "Low battery triggers automatic return to base",
-        ))
+        .record(
+            create_experience("Low battery triggers automatic return to base"),
+            None,
+        )
         .unwrap();
 
     // Reinforce both together as helpful
@@ -244,10 +256,13 @@ fn test_repeated_co_retrieval_increases_strength() {
 
     // Record related memories
     let id1 = memory
-        .record(create_experience("Obstacle A detected at north entrance"))
+        .record(
+            create_experience("Obstacle A detected at north entrance"),
+            None,
+        )
         .unwrap();
     let id2 = memory
-        .record(create_experience("Obstacle A is a forklift"))
+        .record(create_experience("Obstacle A is a forklift"), None)
         .unwrap();
 
     let ids = vec![id1, id2];
@@ -274,7 +289,7 @@ fn test_single_memory_no_associations() {
     let (mut memory, _temp) = setup_memory_system();
 
     let id = memory
-        .record(create_experience("Single isolated memory"))
+        .record(create_experience("Single isolated memory"), None)
         .unwrap();
 
     let ids = vec![id];
@@ -297,10 +312,10 @@ fn test_many_co_retrieved_associations() {
     let mut ids = Vec::new();
     for i in 0..10 {
         let id = memory
-            .record(create_experience(&format!(
-                "Mission log entry {}: patrol sector {}",
-                i, i
-            )))
+            .record(
+                create_experience(&format!("Mission log entry {}: patrol sector {}", i, i)),
+                None,
+            )
             .unwrap();
         ids.push(id);
     }
@@ -327,9 +342,9 @@ fn test_reinforcement_stats_counts() {
     let (mut memory, _temp) = setup_memory_system();
 
     // Record memories
-    let id1 = memory.record(create_experience("Memory 1")).unwrap();
-    let id2 = memory.record(create_experience("Memory 2")).unwrap();
-    let id3 = memory.record(create_experience("Memory 3")).unwrap();
+    let id1 = memory.record(create_experience("Memory 1"), None).unwrap();
+    let id2 = memory.record(create_experience("Memory 2"), None).unwrap();
+    let id3 = memory.record(create_experience("Memory 3"), None).unwrap();
 
     let ids = vec![id1, id2, id3];
     let stats = memory
@@ -385,11 +400,14 @@ fn test_importance_boost_formula() {
 
     // Create memory with known importance
     let id = memory
-        .record(Experience {
-            content: "Test content".to_string(),
-            experience_type: ExperienceType::Observation,
-            ..Default::default()
-        })
+        .record(
+            Experience {
+                content: "Test content".to_string(),
+                experience_type: ExperienceType::Observation,
+                ..Default::default()
+            },
+            None,
+        )
         .unwrap();
 
     let before = memory.get_memory(&id).unwrap();
@@ -421,12 +439,15 @@ fn test_importance_decay_formula() {
 
     // Create memory with high importance
     let id = memory
-        .record(Experience {
-            content: "High importance memory".to_string(),
-            experience_type: ExperienceType::Decision,
-            entities: vec!["critical".to_string()],
-            ..Default::default()
-        })
+        .record(
+            Experience {
+                content: "High importance memory".to_string(),
+                experience_type: ExperienceType::Decision,
+                entities: vec!["critical".to_string()],
+                ..Default::default()
+            },
+            None,
+        )
         .unwrap();
 
     let before = memory.get_memory(&id).unwrap();
@@ -461,10 +482,10 @@ fn test_ltp_after_multiple_reinforcements() {
     let (mut memory, _temp) = setup_memory_system();
 
     let id1 = memory
-        .record(create_experience("Pattern A observation"))
+        .record(create_experience("Pattern A observation"), None)
         .unwrap();
     let id2 = memory
-        .record(create_experience("Pattern A confirmation"))
+        .record(create_experience("Pattern A confirmation"), None)
         .unwrap();
 
     // Get initial importance
@@ -523,10 +544,10 @@ fn test_retrieve_then_reinforce_cycle() {
     // Record memories
     for i in 0..20 {
         memory
-            .record(create_experience(&format!(
-                "Warehouse zone {} status: operational",
-                i
-            )))
+            .record(
+                create_experience(&format!("Warehouse zone {} status: operational", i)),
+                None,
+            )
             .unwrap();
     }
 
@@ -557,15 +578,18 @@ fn test_reinforced_memories_rank_higher() {
 
     // Record several memories about the same topic
     let id_target = memory
-        .record(create_experience("Target memory: critical safety protocol"))
+        .record(
+            create_experience("Target memory: critical safety protocol"),
+            None,
+        )
         .unwrap();
 
     for i in 0..10 {
         memory
-            .record(create_experience(&format!(
-                "Background memory {} about safety",
-                i
-            )))
+            .record(
+                create_experience(&format!("Background memory {} about safety", i)),
+                None,
+            )
             .unwrap();
     }
 
@@ -601,7 +625,9 @@ fn test_reinforced_memories_rank_higher() {
 fn test_reinforce_same_memory_twice() {
     let (mut memory, _temp) = setup_memory_system();
 
-    let id = memory.record(create_experience("Duplicate test")).unwrap();
+    let id = memory
+        .record(create_experience("Duplicate test"), None)
+        .unwrap();
 
     // Pass same ID twice
     let ids = vec![id.clone(), id.clone()];
@@ -618,7 +644,7 @@ fn test_alternating_feedback() {
     let (mut memory, _temp) = setup_memory_system();
 
     let id = memory
-        .record(create_experience("Alternating feedback test"))
+        .record(create_experience("Alternating feedback test"), None)
         .unwrap();
 
     // Alternate helpful and misleading
@@ -651,7 +677,10 @@ fn test_high_volume_reinforcement() {
     let mut ids = Vec::new();
     for i in 0..100 {
         let id = memory
-            .record(create_experience(&format!("High volume memory {}", i)))
+            .record(
+                create_experience(&format!("High volume memory {}", i)),
+                None,
+            )
             .unwrap();
         ids.push(id);
     }

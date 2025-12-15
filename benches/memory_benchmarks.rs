@@ -68,7 +68,7 @@ fn populate_memories(memory_system: &mut MemorySystem, count: usize) {
 
         let experience = create_experience_with_ner(&content, &ner);
         memory_system
-            .record(experience)
+            .record(experience, None)
             .expect("Failed to record experience");
     }
 }
@@ -82,7 +82,7 @@ fn populate_memories_no_ner(memory_system: &mut MemorySystem, count: usize) {
         );
         let experience = create_experience(&content);
         memory_system
-            .record(experience)
+            .record(experience, None)
             .expect("Failed to record experience");
     }
 }
@@ -135,7 +135,11 @@ fn bench_record_experience(c: &mut Criterion) {
                 // Use iter_batched to separate setup (experience creation) from measurement (record)
                 b.iter_batched(
                     || create_experience(content), // Setup: not measured
-                    |experience| memory_system.record(experience).expect("Failed to record"), // Measured
+                    |experience| {
+                        memory_system
+                            .record(experience, None)
+                            .expect("Failed to record")
+                    }, // Measured
                     BatchSize::SmallInput,
                 );
             },
@@ -287,7 +291,7 @@ fn bench_concurrent_operations(c: &mut Criterion) {
                         let experience = create_experience(&content);
 
                         let mut memory = memory_clone.lock().unwrap();
-                        memory.record(experience).expect("Failed to record");
+                        memory.record(experience, None).expect("Failed to record");
                     });
                     handles.push(handle);
                 }
@@ -336,7 +340,11 @@ fn bench_ner_record_combined(c: &mut Criterion) {
     group.bench_function("ner_record_full", |b| {
         b.iter_batched(
             || create_experience_with_ner(entity_text, &ner),
-            |experience| memory_system.record(experience).expect("Failed to record"),
+            |experience| {
+                memory_system
+                    .record(experience, None)
+                    .expect("Failed to record")
+            },
             BatchSize::SmallInput,
         );
     });
@@ -345,7 +353,11 @@ fn bench_ner_record_combined(c: &mut Criterion) {
     group.bench_function("record_no_ner", |b| {
         b.iter_batched(
             || create_experience(entity_text),
-            |experience| memory_system.record(experience).expect("Failed to record"),
+            |experience| {
+                memory_system
+                    .record(experience, None)
+                    .expect("Failed to record")
+            },
             BatchSize::SmallInput,
         );
     });
@@ -380,7 +392,7 @@ fn bench_end_to_end(c: &mut Criterion) {
             // NER extraction + Record
             let content = "User from Infosys completed task X in Bangalore and is now working on task Y with dependencies on Microsoft module Z";
             let experience = create_experience_with_ner(content, &ner);
-            let _memory_id = memory_system.record(experience).expect("Failed to record");
+            let _memory_id = memory_system.record(experience, None).expect("Failed to record");
 
             // Retrieve related memories
             let query = Query {
@@ -742,21 +754,21 @@ fn bench_cache_performance(c: &mut Criterion) {
         b.iter(|| {
             let counter = cold_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let exp = create_experience(&format!("Unique content iteration {counter}"));
-            memory_system.record(exp).expect("Failed to record");
+            memory_system.record(exp, None).expect("Failed to record");
         });
     });
 
     // Warm up the cache with specific content
     for _ in 0..5 {
         let exp = create_experience("Repeated warehouse obstacle at grid 10,20");
-        let _ = memory_system.record(exp);
+        let _ = memory_system.record(exp, None);
     }
 
     // WARM: Use IDENTICAL content every time (cache hits)
     record_group.bench_function("warm_cached", |b| {
         b.iter(|| {
             let exp = create_experience("Repeated warehouse obstacle at grid 10,20");
-            memory_system.record(exp).expect("Failed to record");
+            memory_system.record(exp, None).expect("Failed to record");
         });
     });
 
@@ -834,7 +846,9 @@ fn bench_forget_operation(c: &mut Criterion) {
                 // Setup: Create memory system and add a memory to forget
                 let (mut memory_system, temp_dir) = setup_memory_system();
                 let experience = create_experience("Memory to be forgotten for benchmark");
-                let memory_id = memory_system.record(experience).expect("Failed to record");
+                let memory_id = memory_system
+                    .record(experience, None)
+                    .expect("Failed to record");
                 (memory_system, memory_id, temp_dir)
             },
             |(mut memory_system, memory_id, _temp_dir)| {
@@ -853,7 +867,9 @@ fn bench_forget_operation(c: &mut Criterion) {
             || {
                 let (mut memory_system, temp_dir) = setup_memory_system();
                 let experience = create_experience("Memory with stats tracking benchmark");
-                let memory_id = memory_system.record(experience).expect("Failed to record");
+                let memory_id = memory_system
+                    .record(experience, None)
+                    .expect("Failed to record");
                 let stats_before = memory_system.stats();
                 (memory_system, memory_id, stats_before, temp_dir)
             },
@@ -880,7 +896,9 @@ fn bench_forget_operation(c: &mut Criterion) {
                 let mut memory_ids = Vec::new();
                 for i in 0..10 {
                     let experience = create_experience(&format!("Batch forget memory {i}"));
-                    let id = memory_system.record(experience).expect("Failed to record");
+                    let id = memory_system
+                        .record(experience, None)
+                        .expect("Failed to record");
                     memory_ids.push(id);
                 }
                 (memory_system, memory_ids, temp_dir)
@@ -1004,7 +1022,9 @@ fn bench_stats_accuracy(c: &mut Criterion) {
             |(mut memory_system, _temp_dir)| {
                 let stats_before = memory_system.stats();
                 let experience = create_experience("New memory for stats tracking");
-                memory_system.record(experience).expect("Failed to record");
+                memory_system
+                    .record(experience, None)
+                    .expect("Failed to record");
                 let stats_after = memory_system.stats();
 
                 // Verify count increased
@@ -1024,7 +1044,9 @@ fn bench_stats_accuracy(c: &mut Criterion) {
             || {
                 let (mut memory_system, temp_dir) = setup_memory_system();
                 let experience = create_experience("Memory to track forget stats");
-                let memory_id = memory_system.record(experience).expect("Failed to record");
+                let memory_id = memory_system
+                    .record(experience, None)
+                    .expect("Failed to record");
                 (memory_system, memory_id, temp_dir)
             },
             |(mut memory_system, memory_id, _temp_dir)| {

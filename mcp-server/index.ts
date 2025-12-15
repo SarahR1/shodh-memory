@@ -149,7 +149,7 @@ async function connectStream(): Promise<void> {
 }
 
 // Stream a memory to the server (non-blocking)
-function streamMemory(content: string, tags: string[] = [], source: string = "assistant"): void {
+function streamMemory(content: string, tags: string[] = [], source: string = "assistant", timestamp?: string): void {
   if (!STREAM_ENABLED || content.length < STREAM_MIN_CONTENT_LENGTH) return;
 
   // Server expects serde tag format: { "type": "content", ... }
@@ -157,6 +157,7 @@ function streamMemory(content: string, tags: string[] = [], source: string = "as
     type: "content",
     content: content.slice(0, 4000),
     source: source,
+    timestamp: timestamp || new Date().toISOString(), // Use provided timestamp or current time
     tags: ["stream", ...tags],
     metadata: {},
   });
@@ -408,6 +409,10 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "array",
               items: { type: "string" },
               description: "Optional tags for categorization",
+            },
+            created_at: {
+              type: "string",
+              description: "Optional ISO 8601 timestamp for the memory (e.g., '2025-12-15T06:30:00Z'). If not provided, uses current time.",
             },
           },
           required: ["content"],
@@ -722,10 +727,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const executeTool = async (): Promise<ToolResult> => {
     switch (name) {
       case "remember": {
-        const { content, type = "Observation", tags = [] } = args as {
+        const { content, type = "Observation", tags = [], created_at } = args as {
           content: string;
           type?: string;
           tags?: string[];
+          created_at?: string;
         };
 
         const result = await apiCall<{ id: string }>("/api/remember", "POST", {
@@ -733,6 +739,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           content,
           memory_type: type,
           tags,
+          ...(created_at && { created_at }),
         });
 
         return {

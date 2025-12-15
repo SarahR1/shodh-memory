@@ -101,7 +101,7 @@ fn test_brutal_concurrent_writes() {
                     ),
                     vec!["stress", "concurrent", &format!("thread{}", thread_id)],
                 );
-                match sys.record(exp) {
+                match sys.record(exp, None) {
                     Ok(_) => success.fetch_add(1, Ordering::SeqCst),
                     Err(_) => errors.fetch_add(1, Ordering::SeqCst),
                 };
@@ -142,7 +142,7 @@ fn test_brutal_concurrent_read_write() {
             &format!("Pre-populated memory {} for concurrent test", i),
             vec!["prepop"],
         );
-        system.record(exp).expect("Failed to prepopulate");
+        system.record(exp, None).expect("Failed to prepopulate");
     }
 
     let system = Arc::new(system); // No external lock - internally thread-safe
@@ -162,7 +162,7 @@ fn test_brutal_concurrent_read_write() {
                     &format!("Writer {} memory {}", thread_id, i),
                     vec!["writer"],
                 );
-                if sys.record(exp).is_ok() {
+                if sys.record(exp, None).is_ok() {
                     writes.fetch_add(1, Ordering::SeqCst);
                 }
             }
@@ -219,7 +219,7 @@ fn test_brutal_concurrent_reinforcement_race() {
     let mut ids = Vec::new();
     for i in 0..10 {
         let exp = create_experience(&format!("Race target {}", i), vec!["race"]);
-        ids.push(system.record(exp).expect("Failed"));
+        ids.push(system.record(exp, None).expect("Failed"));
     }
 
     let ids = Arc::new(ids);
@@ -293,7 +293,7 @@ fn test_brutal_multiple_restart_cycles() {
                 &format!("Restart cycle {} memory {}", cycle, i),
                 vec!["restart"],
             );
-            let id = system.record(exp).expect("Failed to record");
+            let id = system.record(exp, None).expect("Failed to record");
             all_ids.push(id);
         }
 
@@ -336,7 +336,7 @@ fn test_brutal_partial_write_recovery() {
              Failure to preserve this would be catastrophic for the entire system.",
             vec!["crash", "recovery", "critical"],
         );
-        memory_id = system.record(exp).expect("Failed to record");
+        memory_id = system.record(exp, None).expect("Failed to record");
         initial_importance = system.get_memory(&memory_id).unwrap().importance();
 
         // Boost importance multiple times to ensure detectable change
@@ -403,7 +403,7 @@ fn test_brutal_exceed_working_memory() {
             &format!("Overflow memory {} with lots of content to push limits", i),
             vec!["overflow"],
         );
-        let id = system.record(exp).expect("Failed to record");
+        let id = system.record(exp, None).expect("Failed to record");
         all_ids.push(id);
     }
 
@@ -429,7 +429,9 @@ fn test_brutal_large_content() {
         ..Default::default()
     };
 
-    let id = system.record(exp).expect("Should handle large content");
+    let id = system
+        .record(exp, None)
+        .expect("Should handle large content");
 
     // Retrieve and verify
     let memory = system
@@ -456,7 +458,9 @@ fn test_brutal_many_entities() {
         ..Default::default()
     };
 
-    let id = system.record(exp).expect("Should handle many entities");
+    let id = system
+        .record(exp, None)
+        .expect("Should handle many entities");
 
     let memory = system.get_memory(&id).expect("Should retrieve");
     assert_eq!(
@@ -476,7 +480,7 @@ fn test_brutal_importance_boundary_cycling() {
     let (system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Boundary test", vec!["boundary"]);
-    let id = system.record(exp).expect("Failed");
+    let id = system.record(exp, None).expect("Failed");
 
     // Cycle importance to max and back multiple times
     for cycle in 0..10 {
@@ -516,7 +520,7 @@ fn test_brutal_importance_bounds_invariant() {
     let (system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Bounds invariant test", vec!["bounds"]);
-    let id = system.record(exp).expect("Failed");
+    let id = system.record(exp, None).expect("Failed");
 
     // Extreme boosts
     for _ in 0..1000 {
@@ -568,7 +572,7 @@ fn test_brutal_no_id_collisions() {
 
     for i in 0..500 {
         let exp = create_experience(&format!("Collision test {}", i), vec!["collision"]);
-        let id = system.record(exp).expect("Failed to record");
+        let id = system.record(exp, None).expect("Failed to record");
 
         // Verify no collision
         assert!(
@@ -593,7 +597,7 @@ fn test_brutal_dense_graph() {
     let mut ids = Vec::new();
     for i in 0..50 {
         let exp = create_experience(&format!("Graph node {}", i), vec!["graph"]);
-        ids.push(system.record(exp).expect("Failed"));
+        ids.push(system.record(exp, None).expect("Failed"));
     }
 
     // Create full mesh - every pair of memories associated
@@ -623,7 +627,7 @@ fn test_brutal_graph_maintenance_cycles() {
     let mut ids = Vec::new();
     for i in 0..20 {
         let exp = create_experience(&format!("Maintenance test {}", i), vec!["maint"]);
-        ids.push(system.record(exp).expect("Failed"));
+        ids.push(system.record(exp, None).expect("Failed"));
     }
 
     // Build associations
@@ -658,7 +662,7 @@ fn test_brutal_timing_record() {
     let start = Instant::now();
     for i in 0..100 {
         let exp = create_experience(&format!("Timing test {}", i), vec!["timing"]);
-        system.record(exp).expect("Failed");
+        system.record(exp, None).expect("Failed");
     }
     let elapsed = start.elapsed();
 
@@ -681,7 +685,7 @@ fn test_brutal_timing_retrieval() {
     // Populate
     for i in 0..100 {
         let exp = create_experience(&format!("Retrieval timing {}", i), vec!["retrieve"]);
-        system.record(exp).expect("Failed");
+        system.record(exp, None).expect("Failed");
     }
 
     let start = Instant::now();
@@ -743,7 +747,7 @@ fn test_brutal_unicode_content() {
         ..Default::default()
     };
 
-    let id = system.record(exp).expect("Should handle unicode");
+    let id = system.record(exp, None).expect("Should handle unicode");
     let memory = system.get_memory(&id).expect("Should retrieve unicode");
     assert_eq!(
         memory.experience.content, unicode_content,
@@ -758,7 +762,9 @@ fn test_brutal_special_characters() {
 
     let special = "Special:\t\n\r content";
     let exp = create_experience(special, vec!["special"]);
-    let id = system.record(exp).expect("Should handle special chars");
+    let id = system
+        .record(exp, None)
+        .expect("Should handle special chars");
     let memory = system.get_memory(&id).expect("Should retrieve");
     assert!(
         memory.experience.content.contains("Special"),
@@ -779,7 +785,7 @@ fn test_brutal_long_entity_names() {
         ..Default::default()
     };
 
-    let id = system.record(exp).expect("Should handle long entity");
+    let id = system.record(exp, None).expect("Should handle long entity");
     let memory = system.get_memory(&id).expect("Should retrieve");
     assert_eq!(
         memory.experience.entities[0].len(),
@@ -806,7 +812,7 @@ fn test_brutal_data_integrity() {
         for i in 0..50 {
             let content = format!("Integrity test {} - unique content {}", i, Uuid::new_v4());
             let exp = create_experience(&content, vec!["integrity"]);
-            let id = system.record(exp).expect("Failed");
+            let id = system.record(exp, None).expect("Failed");
             expected_contents.push((id, content));
         }
     }
@@ -837,7 +843,7 @@ fn test_brutal_reader_parallelism() {
     let mut ids = Vec::new();
     for i in 0..100 {
         let exp = create_experience(&format!("Reader parallelism test {}", i), vec!["parallel"]);
-        ids.push(system.record(exp).expect("Failed to record"));
+        ids.push(system.record(exp, None).expect("Failed to record"));
     }
 
     let system = Arc::new(system); // No external lock - internally thread-safe
@@ -909,7 +915,7 @@ fn test_brutal_no_deadlock_mixed_operations() {
                         &format!("Deadlock test thread {} op {}", thread_id, i),
                         vec!["deadlock"],
                     );
-                    if let Ok(id) = sys.record(exp) {
+                    if let Ok(id) = sys.record(exp, None) {
                         recorded_ids.push(id);
                     }
                 } else {
@@ -967,7 +973,7 @@ fn test_brutal_lock_order_safety() {
     let mut ids = Vec::new();
     for i in 0..20 {
         let exp = create_experience(&format!("Lock order test {}", i), vec!["lock"]);
-        ids.push(system.record(exp).expect("Failed"));
+        ids.push(system.record(exp, None).expect("Failed"));
     }
     drop(system);
 
@@ -1014,7 +1020,7 @@ fn test_brutal_cache_eviction_integrity() {
     for i in 0..100 {
         let content = format!("Cache eviction test {} - {}", i, Uuid::new_v4());
         let exp = create_experience(&content, vec!["eviction"]);
-        let id = system.record(exp).expect("Failed");
+        let id = system.record(exp, None).expect("Failed");
         all_ids.push(id);
         expected_contents.push(content);
     }
@@ -1042,7 +1048,7 @@ fn test_brutal_reinforcement_race() {
 
     // Create test memory
     let exp = create_experience("Reinforcement race test", vec!["race"]);
-    let memory_id = system.record(exp).expect("Failed");
+    let memory_id = system.record(exp, None).expect("Failed");
 
     let system = Arc::new(system); // No external lock - internally thread-safe
     let num_threads = 8;
@@ -1103,11 +1109,11 @@ fn test_brutal_storage_isolation() {
 
     // Write to system1
     let exp1 = create_experience("System 1 only data", vec!["isolated"]);
-    let id1 = system1.record(exp1).expect("Failed");
+    let id1 = system1.record(exp1, None).expect("Failed");
 
     // Write to system2
     let exp2 = create_experience("System 2 only data", vec!["isolated"]);
-    let id2 = system2.record(exp2).expect("Failed");
+    let id2 = system2.record(exp2, None).expect("Failed");
 
     // Verify isolation - system1 shouldn't see system2's data
     assert!(
@@ -1170,7 +1176,7 @@ fn test_brutal_full_pipeline_stress() {
                 // Step 1: Record
                 let content = format!("Pipeline stress thread {} cycle {}", thread_id, cycle);
                 let exp = create_experience(&content, vec!["pipeline"]);
-                let memory_id = sys.record(exp).expect("Record failed");
+                let memory_id = sys.record(exp, None).expect("Record failed");
 
                 // Step 2: Retrieve (verify findable)
                 let query = Query {
@@ -1215,7 +1221,7 @@ fn test_brutal_graph_consistency() {
     let mut memory_ids = Vec::new();
     for i in 0..30 {
         let exp = create_experience(&format!("Graph consistency {}", i), vec!["graph"]);
-        memory_ids.push(system.record(exp).expect("Failed"));
+        memory_ids.push(system.record(exp, None).expect("Failed"));
     }
 
     let system = Arc::new(system); // No external lock - internally thread-safe
@@ -1263,7 +1269,7 @@ fn test_brutal_lifecycle_churn() {
     // Create batch
     for i in 0..50 {
         let exp = create_experience(&format!("Lifecycle churn {}", i), vec!["lifecycle"]);
-        ids.push(system.record(exp).expect("Failed"));
+        ids.push(system.record(exp, None).expect("Failed"));
     }
 
     // Simulate "deletion" by decaying importance to minimum

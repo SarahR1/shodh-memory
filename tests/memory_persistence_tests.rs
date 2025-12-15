@@ -88,7 +88,7 @@ fn test_memory_survives_system_restart() {
     {
         let system = MemorySystem::new(config.clone()).expect("Failed to create system");
         let exp = create_experience(original_content, vec!["persistence", "test"]);
-        memory_id = system.record(exp).expect("Failed to record");
+        memory_id = system.record(exp, None).expect("Failed to record");
     }
     // System dropped here - simulates restart
 
@@ -128,7 +128,7 @@ fn test_importance_changes_survive_restart() {
     {
         let system = MemorySystem::new(config.clone()).expect("Failed to create system");
         let exp = create_experience("Important information for testing", vec!["importance"]);
-        memory_id = system.record(exp).expect("Failed to record");
+        memory_id = system.record(exp, None).expect("Failed to record");
 
         // Apply multiple helpful reinforcements
         for _ in 0..10 {
@@ -190,7 +190,7 @@ fn test_access_count_survives_restart() {
     {
         let system = MemorySystem::new(config.clone()).expect("Failed to create system");
         let exp = create_experience("Access count test memory", vec!["access"]);
-        memory_id = system.record(exp).expect("Failed to record");
+        memory_id = system.record(exp, None).expect("Failed to record");
 
         // Access multiple times through reinforcement
         for _ in 0..5 {
@@ -234,7 +234,7 @@ fn test_multiple_memories_survive_restart() {
                 &format!("Memory number {} for batch persistence test", i),
                 vec!["batch", "persistence"],
             );
-            let id = system.record(exp).expect("Failed to record");
+            let id = system.record(exp, None).expect("Failed to record");
             memory_ids.push(id);
         }
     }
@@ -266,7 +266,7 @@ fn test_cache_coherency_importance_visible_immediately() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Cache coherency test memory", vec!["cache"]);
-    let id = system.record(exp).expect("Failed to record");
+    let id = system.record(exp, None).expect("Failed to record");
 
     // Get initial importance through retrieval
     let query = Query {
@@ -299,7 +299,7 @@ fn test_cache_coherency_multiple_retrievals() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Multi-retrieval coherency test", vec!["multi"]);
-    let id = system.record(exp).expect("Failed to record");
+    let id = system.record(exp, None).expect("Failed to record");
 
     let query = Query {
         query_text: Some("multi-retrieval".to_string()),
@@ -342,7 +342,7 @@ fn test_cache_coherency_decay_visible_immediately() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Decay visibility test", vec!["decay"]);
-    let id = system.record(exp).expect("Failed to record");
+    let id = system.record(exp, None).expect("Failed to record");
 
     let query = Query {
         query_text: Some("decay visibility".to_string()),
@@ -396,7 +396,7 @@ fn test_concurrent_record_and_retrieve() {
                 &format!("Concurrent write test memory {}", i),
                 vec!["concurrent"],
             );
-            sys.record(exp).expect("Failed to record");
+            sys.record(exp, None).expect("Failed to record");
             drop(sys);
             thread::sleep(Duration::from_millis(10));
         }
@@ -439,7 +439,7 @@ fn test_concurrent_reinforcement() {
 
     // Create a memory
     let exp = create_experience("Concurrent reinforcement target", vec!["target"]);
-    let id = system.record(exp).expect("Failed to record");
+    let id = system.record(exp, None).expect("Failed to record");
 
     let system = Arc::new(parking_lot::Mutex::new(system));
     let id_clone = id.clone();
@@ -507,7 +507,7 @@ fn test_reinforce_mixed_existing_nonexistent() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Real memory for mixed test", vec!["mixed"]);
-    let real_id = system.record(exp).expect("Failed to record");
+    let real_id = system.record(exp, None).expect("Failed to record");
     let fake_id = MemoryId(Uuid::new_v4());
 
     let stats = system
@@ -525,7 +525,7 @@ fn test_importance_bounds_at_maximum() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Max importance test", vec!["max"]);
-    let id = system.record(exp).expect("Failed to record");
+    let id = system.record(exp, None).expect("Failed to record");
 
     // Boost many times to try to exceed 1.0
     for _ in 0..100 {
@@ -558,7 +558,7 @@ fn test_importance_bounds_at_minimum() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Min importance test", vec!["min"]);
-    let id = system.record(exp).expect("Failed to record");
+    let id = system.record(exp, None).expect("Failed to record");
 
     // Decay many times to try to go below floor
     for _ in 0..100 {
@@ -586,7 +586,7 @@ fn test_alternating_boost_and_decay() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Alternating reinforcement test", vec!["alternating"]);
-    let id = system.record(exp).expect("Failed to record");
+    let id = system.record(exp, None).expect("Failed to record");
 
     let query = Query {
         query_text: Some("alternating reinforcement".to_string()),
@@ -656,7 +656,7 @@ fn test_large_batch_reinforcement() {
     let mut ids = Vec::new();
     for i in 0..50 {
         let exp = create_experience(&format!("Large batch memory {}", i), vec!["batch"]);
-        let id = system.record(exp).expect("Failed to record");
+        let id = system.record(exp, None).expect("Failed to record");
         ids.push(id);
     }
 
@@ -689,7 +689,7 @@ fn test_memory_in_working_tier_after_record() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Working tier test memory", vec!["tier"]);
-    let _id = system.record(exp).expect("Failed to record");
+    let _id = system.record(exp, None).expect("Failed to record");
 
     // Immediately retrievable through semantic search
     let query = Query {
@@ -715,7 +715,7 @@ fn test_high_volume_record_and_retrieve() {
             &format!("High volume test memory number {} with unique content", i),
             vec!["volume", &format!("item{}", i)],
         );
-        system.record(exp).expect("Failed to record");
+        system.record(exp, None).expect("Failed to record");
     }
 
     // Verify retrieval still works with semantic search
@@ -760,7 +760,7 @@ fn test_rapid_record_retrieve_cycle() {
     // Phase 1: Rapid record
     for i in 0..30 {
         let exp = create_experience(&format!("Rapid cycle memory {}", i), vec!["rapid"]);
-        let id = system.record(exp).expect("Failed to record");
+        let id = system.record(exp, None).expect("Failed to record");
         recorded_ids.push(id);
     }
 
@@ -800,7 +800,7 @@ fn test_stress_reinforcement_cycles() {
     let mut ids = Vec::new();
     for i in 0..20 {
         let exp = create_experience(&format!("Stress test memory {}", i), vec!["stress"]);
-        let id = system.record(exp).expect("Failed to record");
+        let id = system.record(exp, None).expect("Failed to record");
         ids.push(id);
     }
 

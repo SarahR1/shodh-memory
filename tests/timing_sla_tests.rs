@@ -146,7 +146,7 @@ fn test_sla_record_p50_latency() {
     // Warm up
     for i in 0..5 {
         let exp = create_experience(&format!("Warmup {}", i));
-        let _ = system.record(exp);
+        let _ = system.record(exp, None);
     }
 
     // Measure
@@ -154,7 +154,7 @@ fn test_sla_record_p50_latency() {
     for i in 0..20 {
         let exp = create_experience(&format!("Timing test {}", i));
         let start = Instant::now();
-        let _ = system.record(exp);
+        let _ = system.record(exp, None);
         durations.push(start.elapsed().as_millis());
     }
 
@@ -180,7 +180,7 @@ fn test_sla_record_p99_latency() {
     // Warm up
     for i in 0..5 {
         let exp = create_experience(&format!("Warmup {}", i));
-        let _ = system.record(exp);
+        let _ = system.record(exp, None);
     }
 
     // Measure more samples for P99
@@ -188,7 +188,7 @@ fn test_sla_record_p99_latency() {
     for i in 0..50 {
         let exp = create_rich_experience(i);
         let start = Instant::now();
-        let _ = system.record(exp);
+        let _ = system.record(exp, None);
         durations.push(start.elapsed().as_millis());
     }
 
@@ -218,7 +218,7 @@ fn test_sla_retrieve_p50_latency() {
     // Populate with test data
     for i in 0..50 {
         let exp = create_rich_experience(i);
-        let _ = system.record(exp);
+        let _ = system.record(exp, None);
     }
 
     // Warm up retrieval
@@ -273,7 +273,7 @@ fn test_sla_retrieve_p99_latency() {
     // Populate with more data
     for i in 0..100 {
         let exp = create_rich_experience(i);
-        let _ = system.record(exp);
+        let _ = system.record(exp, None);
     }
 
     // Measure with varied queries
@@ -316,7 +316,7 @@ fn test_sla_batch_100_records() {
     let start = Instant::now();
     for i in 0..100 {
         let exp = create_rich_experience(i);
-        system.record(exp).expect("Failed to record");
+        system.record(exp, None).expect("Failed to record");
     }
     let duration = start.elapsed().as_millis();
 
@@ -346,7 +346,7 @@ fn test_sla_throughput_sustained() {
 
     for i in 0..200 {
         let exp = create_experience(&format!("Throughput test {}", i));
-        if system.record(exp).is_ok() {
+        if system.record(exp, None).is_ok() {
             success_count += 1;
         }
     }
@@ -380,7 +380,7 @@ fn test_sla_stats_latency() {
     // Add some data
     for i in 0..50 {
         let exp = create_experience(&format!("Stats test {}", i));
-        let _ = system.record(exp);
+        let _ = system.record(exp, None);
     }
 
     // Measure stats latency
@@ -428,7 +428,7 @@ fn test_sla_cold_start_latency() {
     // First record after cold start loads the embedding model, so give it extra time
     let exp = create_experience("First record after cold start");
     let start = Instant::now();
-    system.record(exp).expect("Failed to record");
+    system.record(exp, None).expect("Failed to record");
     let first_record_duration = start.elapsed().as_millis();
 
     // First record can take longer due to model loading (5s threshold)
@@ -457,7 +457,7 @@ fn test_sla_flush_latency() {
     // Add data
     for i in 0..100 {
         let exp = create_experience(&format!("Flush test {}", i));
-        let _ = system.record(exp);
+        let _ = system.record(exp, None);
     }
 
     // Measure flush latency
@@ -491,7 +491,7 @@ fn test_sla_concurrent_access_latency() {
     // Pre-populate
     for i in 0..50 {
         let exp = create_experience(&format!("Pre-populate {}", i));
-        let _ = system.record(exp);
+        let _ = system.record(exp, None);
     }
 
     // Simulate concurrent access (alternating reads and writes)
@@ -503,7 +503,7 @@ fn test_sla_concurrent_access_latency() {
             // Write
             let exp = create_experience(&format!("Concurrent write {}", i));
             let start = Instant::now();
-            let _ = system.record(exp);
+            let _ = system.record(exp, None);
             total_duration += start.elapsed().as_millis();
         } else {
             // Read
@@ -554,7 +554,7 @@ fn test_sla_geo_filter_latency() {
             geo_location: Some([lat, lon, 0.0]),
             ..Default::default()
         };
-        let _ = system.record(exp);
+        let _ = system.record(exp, None);
     }
 
     // Measure geo-filtered retrieval
@@ -601,7 +601,7 @@ fn test_sla_maintenance_latency() {
     // Add memories
     for i in 0..100 {
         let exp = create_rich_experience(i);
-        let _ = system.record(exp);
+        let _ = system.record(exp, None);
     }
 
     // Measure maintenance operation
@@ -640,7 +640,7 @@ fn test_performance_summary() {
     for i in 0..30 {
         let exp = create_rich_experience(i);
         let start = Instant::now();
-        let _ = system.record(exp);
+        let _ = system.record(exp, None);
         record_durations.push(start.elapsed().as_millis());
     }
     record_durations.sort();

@@ -86,6 +86,7 @@ fn test_memory_starts_in_working() {
         None,
         None,
         None,
+        None, // created_at
     );
     assert_eq!(memory.tier, MemoryTier::Working);
 }
@@ -99,6 +100,7 @@ fn test_promote_working_to_session() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.promote();
     assert_eq!(memory.tier, MemoryTier::Session);
@@ -113,6 +115,7 @@ fn test_promote_session_to_longterm() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.tier = MemoryTier::Session;
     memory.promote();
@@ -128,6 +131,7 @@ fn test_promote_longterm_to_archive() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.tier = MemoryTier::LongTerm;
     memory.promote();
@@ -143,6 +147,7 @@ fn test_promote_archive_stays_archive() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.tier = MemoryTier::Archive;
     memory.promote();
@@ -158,6 +163,7 @@ fn test_demote_archive_to_longterm() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.tier = MemoryTier::Archive;
     memory.demote();
@@ -173,6 +179,7 @@ fn test_demote_longterm_to_session() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.tier = MemoryTier::LongTerm;
     memory.demote();
@@ -188,6 +195,7 @@ fn test_demote_session_to_working() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.tier = MemoryTier::Session;
     memory.demote();
@@ -203,6 +211,7 @@ fn test_demote_working_stays_working() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.tier = MemoryTier::Working;
     memory.demote();
@@ -218,6 +227,7 @@ fn test_tier_full_cycle() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     // Promote all the way
@@ -251,6 +261,7 @@ fn test_tier_preserved_on_serialization() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.tier = MemoryTier::LongTerm;
 
@@ -275,6 +286,7 @@ fn test_all_tiers_serialize() {
             None,
             None,
             None,
+            None, // created_at
         );
         memory.tier = tier;
 
@@ -322,6 +334,7 @@ fn test_high_importance_memories_preserved() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     assert!(memory.importance() >= 0.7);
@@ -336,6 +349,7 @@ fn test_low_importance_eligible_for_forget() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     assert!(memory.importance() < 0.5);
@@ -347,20 +361,26 @@ fn test_importance_affects_retention() {
 
     // Record high importance memory
     let high_id = system
-        .record(Experience {
-            content: "Very important observation".to_string(),
-            experience_type: ExperienceType::Decision, // Decisions get higher importance
-            ..Default::default()
-        })
+        .record(
+            Experience {
+                content: "Very important observation".to_string(),
+                experience_type: ExperienceType::Decision, // Decisions get higher importance
+                ..Default::default()
+            },
+            None,
+        )
         .unwrap();
 
     // Record low importance memory
     let low_id = system
-        .record(Experience {
-            content: "Random observation".to_string(),
-            experience_type: ExperienceType::Observation,
-            ..Default::default()
-        })
+        .record(
+            Experience {
+                content: "Random observation".to_string(),
+                experience_type: ExperienceType::Observation,
+                ..Default::default()
+            },
+            None,
+        )
         .unwrap();
 
     // Both should exist
@@ -379,7 +399,7 @@ fn test_working_memory_capacity() {
     // Record more memories than working memory capacity
     for i in 0..20 {
         system
-            .record(create_experience(&format!("Memory {}", i)))
+            .record(create_experience(&format!("Memory {}", i)), None)
             .unwrap();
     }
 
@@ -395,7 +415,7 @@ fn test_session_memory_used() {
     // Fill up working memory
     for i in 0..15 {
         system
-            .record(create_experience(&format!("Overflow memory {}", i)))
+            .record(create_experience(&format!("Overflow memory {}", i)), None)
             .unwrap();
     }
 
@@ -411,7 +431,7 @@ fn test_graph_maintenance_succeeds() {
     // Record some memories
     for i in 0..5 {
         system
-            .record(create_experience(&format!("To consolidate {}", i)))
+            .record(create_experience(&format!("To consolidate {}", i)), None)
             .unwrap();
     }
 
@@ -432,6 +452,7 @@ fn test_new_memory_not_compressed() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     assert!(!memory.compressed);
@@ -446,6 +467,7 @@ fn test_compressed_flag_serializes() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.compressed = true;
 
@@ -468,6 +490,7 @@ fn test_frequently_accessed_stays_active() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     // Multiple accesses
@@ -487,6 +510,7 @@ fn test_rarely_accessed_eligible_for_archive() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     // No accesses
@@ -502,6 +526,7 @@ fn test_access_updates_timestamp() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     let before = memory.last_accessed();
@@ -523,7 +548,7 @@ fn test_many_memories_graph_maintenance() {
     // Create many memories
     for i in 0..50 {
         system
-            .record(create_experience(&format!("Bulk memory {}", i)))
+            .record(create_experience(&format!("Bulk memory {}", i)), None)
             .unwrap();
     }
 
@@ -545,7 +570,7 @@ fn test_multiple_graph_maintenance_calls() {
 
     for i in 0..10 {
         system
-            .record(create_experience(&format!("Memory {}", i)))
+            .record(create_experience(&format!("Memory {}", i)), None)
             .unwrap();
     }
 
@@ -568,6 +593,7 @@ fn test_high_importance_working_memory() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     assert_eq!(memory.tier, MemoryTier::Working);
@@ -589,6 +615,7 @@ fn test_low_importance_archive() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.tier = MemoryTier::Archive;
 
@@ -605,6 +632,7 @@ fn test_tier_independent_of_importance() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     let mut low = Memory::new(
@@ -614,6 +642,7 @@ fn test_tier_independent_of_importance() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     // Both can be promoted
@@ -639,6 +668,7 @@ fn test_batch_promote() {
                 None,
                 None,
                 None,
+                None, // created_at
             )
         })
         .collect();
@@ -663,6 +693,7 @@ fn test_batch_demote() {
                 None,
                 None,
                 None,
+                None, // created_at
             );
             m.tier = MemoryTier::Session;
             m
@@ -698,6 +729,7 @@ fn test_heterogeneous_tier_batch() {
             None,
             None,
             None,
+            None, // created_at
         );
         m.tier = *tier;
         memories.push((i, m));
@@ -728,6 +760,7 @@ fn test_tier_after_many_operations() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     // Many promotions (should cap at Archive)
@@ -752,6 +785,7 @@ fn test_tier_with_zero_importance() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     // Tier operations still work
@@ -768,6 +802,7 @@ fn test_tier_with_max_importance() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     // Tier operations still work
@@ -785,7 +820,7 @@ fn test_stats_report_accurate() {
 
     for i in 0..10 {
         system
-            .record(create_experience(&format!("Stats test {}", i)))
+            .record(create_experience(&format!("Stats test {}", i)), None)
             .unwrap();
     }
 
@@ -817,6 +852,7 @@ fn test_concurrent_tier_reads() {
         None,
         None,
         None,
+        None, // created_at
     ));
 
     let handles: Vec<_> = (0..10)
@@ -867,10 +903,10 @@ fn test_consolidation_report_after_retrieval() {
 
     // Record some memories
     let _id1 = system
-        .record(create_experience("Paris is the capital of France"))
+        .record(create_experience("Paris is the capital of France"), None)
         .unwrap();
     let _id2 = system
-        .record(create_experience("The Eiffel Tower is in Paris"))
+        .record(create_experience("The Eiffel Tower is in Paris"), None)
         .unwrap();
 
     // Retrieve memories multiple times to trigger strengthening
@@ -902,7 +938,7 @@ fn test_consolidation_report_after_maintenance() {
     // Record memories
     for i in 0..10 {
         system
-            .record(create_experience(&format!("Test memory {}", i)))
+            .record(create_experience(&format!("Test memory {}", i)), None)
             .unwrap();
     }
 
@@ -925,13 +961,16 @@ fn test_consolidation_report_hebbian_learning() {
 
     // Record memories with related content
     let _id1 = system
-        .record(create_experience("Rust is a systems programming language"))
+        .record(
+            create_experience("Rust is a systems programming language"),
+            None,
+        )
         .unwrap();
     let _id2 = system
-        .record(create_experience("Rust has ownership and borrowing"))
+        .record(create_experience("Rust has ownership and borrowing"), None)
         .unwrap();
     let _id3 = system
-        .record(create_experience("Rust prevents memory leaks"))
+        .record(create_experience("Rust prevents memory leaks"), None)
         .unwrap();
 
     // Retrieve related memories together multiple times
@@ -962,7 +1001,7 @@ fn test_consolidation_report_time_filtering() {
 
     // Record and retrieve memories
     let _id1 = system
-        .record(create_experience("Time-filtered test memory"))
+        .record(create_experience("Time-filtered test memory"), None)
         .unwrap();
 
     for _ in 0..7 {
@@ -1001,7 +1040,7 @@ fn test_consolidation_event_buffer_clear() {
 
     // Generate some events
     system
-        .record(create_experience("Buffer clear test"))
+        .record(create_experience("Buffer clear test"), None)
         .unwrap();
     let query = Query {
         query_text: Some("Buffer".to_string()),
@@ -1037,7 +1076,10 @@ fn test_consolidation_report_stats_consistency() {
     // Record and interact with memories
     for i in 0..5 {
         system
-            .record(create_experience(&format!("Stats consistency test {}", i)))
+            .record(
+                create_experience(&format!("Stats consistency test {}", i)),
+                None,
+            )
             .unwrap();
     }
 
@@ -1087,11 +1129,14 @@ fn test_memory_strengthening_records_before_after() {
 
     // Record a memory with moderate initial importance
     let _id = system
-        .record(Experience {
-            content: "Strengthening before/after test".to_string(),
-            experience_type: ExperienceType::Observation,
-            ..Default::default()
-        })
+        .record(
+            Experience {
+                content: "Strengthening before/after test".to_string(),
+                experience_type: ExperienceType::Observation,
+                ..Default::default()
+            },
+            None,
+        )
         .unwrap();
 
     // Access the memory many times to trigger importance boost
@@ -1123,10 +1168,10 @@ fn test_edge_events_have_strength_values() {
 
     // Record related memories
     let _id1 = system
-        .record(create_experience("Edge test: topic A related"))
+        .record(create_experience("Edge test: topic A related"), None)
         .unwrap();
     let _id2 = system
-        .record(create_experience("Edge test: topic A connected"))
+        .record(create_experience("Edge test: topic A connected"), None)
         .unwrap();
 
     // Retrieve together to form edges
@@ -1170,7 +1215,7 @@ fn test_consolidation_events_list() {
 
     // Record and retrieve a memory
     system
-        .record(create_experience("Test consolidation events list"))
+        .record(create_experience("Test consolidation events list"), None)
         .unwrap();
 
     for _ in 0..7 {
@@ -1208,7 +1253,7 @@ fn test_consolidation_events_since_filter() {
 
     // Record a memory and generate some events
     system
-        .record(create_experience("Test events since filter"))
+        .record(create_experience("Test events since filter"), None)
         .unwrap();
 
     let start_time = Utc::now();
@@ -1243,7 +1288,7 @@ fn test_consolidation_event_count() {
 
     // Record a memory and do some retrievals
     system
-        .record(create_experience("Test event count"))
+        .record(create_experience("Test event count"), None)
         .unwrap();
 
     for _ in 0..7 {

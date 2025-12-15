@@ -48,6 +48,7 @@ fn create_test_memory(content: &str, importance: f32) -> Memory {
         None,
         None,
         None,
+        None, // created_at
     )
 }
 
@@ -58,6 +59,7 @@ fn create_robotics_memory(
     geo_location: Option<[f64; 3]>,
     action_type: Option<&str>,
     reward: Option<f32>,
+    _created_at: Option<chrono::DateTime<chrono::Utc>>, // unused, for API consistency
 ) -> Memory {
     let experience = Experience {
         content: content.to_string(),
@@ -69,7 +71,15 @@ fn create_robotics_memory(
         reward,
         ..Default::default()
     };
-    Memory::new(MemoryId(Uuid::new_v4()), experience, 0.5, None, None, None)
+    Memory::new(
+        MemoryId(Uuid::new_v4()),
+        experience,
+        0.5,
+        None,
+        None,
+        None,
+        None,
+    )
 }
 
 fn create_decision_memory(
@@ -90,7 +100,15 @@ fn create_decision_memory(
         confidence,
         ..Default::default()
     };
-    Memory::new(MemoryId(Uuid::new_v4()), experience, 0.5, None, None, None)
+    Memory::new(
+        MemoryId(Uuid::new_v4()),
+        experience,
+        0.5,
+        None,
+        None,
+        None,
+        None,
+    )
 }
 
 // ============================================================================
@@ -154,7 +172,15 @@ fn test_experience_type_single_match() {
         experience_type: ExperienceType::Observation,
         ..Default::default()
     };
-    let memory = Memory::new(MemoryId(Uuid::new_v4()), experience, 0.5, None, None, None);
+    let memory = Memory::new(
+        MemoryId(Uuid::new_v4()),
+        experience,
+        0.5,
+        None,
+        None,
+        None,
+        None,
+    );
 
     let query = Query {
         experience_types: Some(vec![ExperienceType::Observation]),
@@ -170,7 +196,15 @@ fn test_experience_type_no_match() {
         experience_type: ExperienceType::Decision,
         ..Default::default()
     };
-    let memory = Memory::new(MemoryId(Uuid::new_v4()), experience, 0.5, None, None, None);
+    let memory = Memory::new(
+        MemoryId(Uuid::new_v4()),
+        experience,
+        0.5,
+        None,
+        None,
+        None,
+        None,
+    );
 
     let query = Query {
         experience_types: Some(vec![ExperienceType::Observation]),
@@ -189,7 +223,15 @@ fn test_experience_type_multiple_allowed() {
         experience_type: ExperienceType::Task,
         ..Default::default()
     };
-    let memory = Memory::new(MemoryId(Uuid::new_v4()), experience, 0.5, None, None, None);
+    let memory = Memory::new(
+        MemoryId(Uuid::new_v4()),
+        experience,
+        0.5,
+        None,
+        None,
+        None,
+        None,
+    );
 
     let query = Query {
         experience_types: Some(vec![
@@ -243,7 +285,7 @@ fn test_time_range_before_start() {
 
 #[test]
 fn test_robot_id_match() {
-    let memory = create_robotics_memory("test", Some("robot_001"), None, None, None, None);
+    let memory = create_robotics_memory("test", Some("robot_001"), None, None, None, None, None);
     let query = Query {
         robot_id: Some("robot_001".to_string()),
         ..Default::default()
@@ -253,7 +295,7 @@ fn test_robot_id_match() {
 
 #[test]
 fn test_robot_id_no_match() {
-    let memory = create_robotics_memory("test", Some("robot_001"), None, None, None, None);
+    let memory = create_robotics_memory("test", Some("robot_001"), None, None, None, None, None);
     let query = Query {
         robot_id: Some("robot_002".to_string()),
         ..Default::default()
@@ -266,7 +308,7 @@ fn test_robot_id_no_match() {
 
 #[test]
 fn test_robot_id_memory_has_none() {
-    let memory = create_robotics_memory("test", None, None, None, None, None);
+    let memory = create_robotics_memory("test", None, None, None, None, None, None);
     let query = Query {
         robot_id: Some("robot_001".to_string()),
         ..Default::default()
@@ -283,7 +325,8 @@ fn test_robot_id_memory_has_none() {
 
 #[test]
 fn test_mission_id_match() {
-    let memory = create_robotics_memory("test", None, Some("mission_alpha"), None, None, None);
+    let memory =
+        create_robotics_memory("test", None, Some("mission_alpha"), None, None, None, None);
     let query = Query {
         mission_id: Some("mission_alpha".to_string()),
         ..Default::default()
@@ -293,7 +336,8 @@ fn test_mission_id_match() {
 
 #[test]
 fn test_mission_id_no_match() {
-    let memory = create_robotics_memory("test", None, Some("mission_alpha"), None, None, None);
+    let memory =
+        create_robotics_memory("test", None, Some("mission_alpha"), None, None, None, None);
     let query = Query {
         mission_id: Some("mission_beta".to_string()),
         ..Default::default()
@@ -318,6 +362,7 @@ fn test_geo_filter_within_radius() {
         Some([37.7749, -122.4194, 0.0]),
         None,
         None,
+        None, // created_at
     );
     // Filter at same location with 1000m radius
     let query = Query {
@@ -337,6 +382,7 @@ fn test_geo_filter_outside_radius() {
         Some([37.8749, -122.4194, 0.0]),
         None,
         None,
+        None, // created_at
     );
     // Filter with 1000m radius
     let query = Query {
@@ -351,7 +397,7 @@ fn test_geo_filter_outside_radius() {
 
 #[test]
 fn test_geo_filter_memory_no_location() {
-    let memory = create_robotics_memory("test", None, None, None, None, None);
+    let memory = create_robotics_memory("test", None, None, None, None, None, None);
     let query = Query {
         geo_filter: Some(GeoFilter::new(37.7749, -122.4194, 1000.0)),
         ..Default::default()
@@ -368,7 +414,7 @@ fn test_geo_filter_memory_no_location() {
 
 #[test]
 fn test_action_type_match() {
-    let memory = create_robotics_memory("test", None, None, None, Some("navigate"), None);
+    let memory = create_robotics_memory("test", None, None, None, Some("navigate"), None, None);
     let query = Query {
         action_type: Some("navigate".to_string()),
         ..Default::default()
@@ -378,7 +424,7 @@ fn test_action_type_match() {
 
 #[test]
 fn test_action_type_no_match() {
-    let memory = create_robotics_memory("test", None, None, None, Some("navigate"), None);
+    let memory = create_robotics_memory("test", None, None, None, Some("navigate"), None, None);
     let query = Query {
         action_type: Some("grasp".to_string()),
         ..Default::default()
@@ -395,7 +441,7 @@ fn test_action_type_no_match() {
 
 #[test]
 fn test_reward_range_within() {
-    let memory = create_robotics_memory("test", None, None, None, None, Some(0.75));
+    let memory = create_robotics_memory("test", None, None, None, None, Some(0.75), None);
     let query = Query {
         reward_range: Some((0.5, 1.0)),
         ..Default::default()
@@ -405,7 +451,7 @@ fn test_reward_range_within() {
 
 #[test]
 fn test_reward_range_below() {
-    let memory = create_robotics_memory("test", None, None, None, None, Some(0.3));
+    let memory = create_robotics_memory("test", None, None, None, None, Some(0.3), None);
     let query = Query {
         reward_range: Some((0.5, 1.0)),
         ..Default::default()
@@ -418,7 +464,7 @@ fn test_reward_range_below() {
 
 #[test]
 fn test_reward_range_above() {
-    let memory = create_robotics_memory("test", None, None, None, None, Some(1.5));
+    let memory = create_robotics_memory("test", None, None, None, None, Some(1.5), None);
     let query = Query {
         reward_range: Some((0.5, 1.0)),
         ..Default::default()
@@ -431,7 +477,7 @@ fn test_reward_range_above() {
 
 #[test]
 fn test_reward_range_no_reward() {
-    let memory = create_robotics_memory("test", None, None, None, None, None);
+    let memory = create_robotics_memory("test", None, None, None, None, None, None);
     let query = Query {
         reward_range: Some((0.5, 1.0)),
         ..Default::default()
@@ -722,7 +768,15 @@ fn test_combined_all_match() {
         confidence: Some(0.95),
         ..Default::default()
     };
-    let memory = Memory::new(MemoryId(Uuid::new_v4()), experience, 0.8, None, None, None);
+    let memory = Memory::new(
+        MemoryId(Uuid::new_v4()),
+        experience,
+        0.8,
+        None,
+        None,
+        None,
+        None,
+    );
 
     let query = Query {
         importance_threshold: Some(0.5),
@@ -755,7 +809,15 @@ fn test_combined_one_fails() {
         reward: Some(0.9),
         ..Default::default()
     };
-    let memory = Memory::new(MemoryId(Uuid::new_v4()), experience, 0.8, None, None, None);
+    let memory = Memory::new(
+        MemoryId(Uuid::new_v4()),
+        experience,
+        0.8,
+        None,
+        None,
+        None,
+        None,
+    );
 
     // Query expects robot_002 but memory has robot_001
     let query = Query {

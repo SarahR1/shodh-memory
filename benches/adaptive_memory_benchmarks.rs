@@ -97,7 +97,7 @@ fn populate_memories(system: &MemorySystem, count: usize) -> Vec<shodh_memory::m
 
         let exp = create_experience_with_ner(&content, exp_type, &ner);
 
-        if let Ok(id) = system.record(exp) {
+        if let Ok(id) = system.record(exp, None) {
             ids.push(id);
         }
     }
@@ -441,7 +441,8 @@ fn bench_reinforce_fact(c: &mut Criterion) {
                 };
 
                 let exp = create_experience("Evidence", ExperienceType::Learning, vec!["test"]);
-                let memory = Memory::new(MemoryId(Uuid::new_v4()), exp, 0.5, None, None, None);
+                let memory =
+                    Memory::new(MemoryId(Uuid::new_v4()), exp, 0.5, None, None, None, None);
 
                 (fact, memory)
             },
@@ -624,7 +625,7 @@ fn bench_relevance_score(c: &mut Criterion) {
                 ExperienceType::Learning,
                 vec!["User", "Auth"],
             );
-            let memory = Memory::new(MemoryId(Uuid::new_v4()), exp, 0.5, None, None, None);
+            let memory = Memory::new(MemoryId(Uuid::new_v4()), exp, 0.5, None, None, None, None);
 
             b.iter(|| prefetch.relevance_score(&memory, ctx));
         });

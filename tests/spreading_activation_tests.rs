@@ -72,6 +72,7 @@ fn test_activation_starts_at_one() {
         None,
         None,
         None,
+        None, // created_at
     );
     assert!((memory.activation() - 1.0).abs() < f32::EPSILON);
 }
@@ -85,6 +86,7 @@ fn test_activate_adds_value() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.set_activation(0.3);
     memory.activate(0.2);
@@ -100,6 +102,7 @@ fn test_activate_clamps_at_one() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.set_activation(0.9);
     memory.activate(0.5);
@@ -115,6 +118,7 @@ fn test_activate_with_zero() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.set_activation(0.5);
     memory.activate(0.0);
@@ -130,6 +134,7 @@ fn test_decay_activation_multiplicative() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.set_activation(1.0);
     memory.decay_activation(0.5);
@@ -145,6 +150,7 @@ fn test_decay_activation_exponential() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.set_activation(1.0);
 
@@ -166,6 +172,7 @@ fn test_decay_activation_approaches_zero() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.set_activation(1.0);
 
@@ -185,6 +192,7 @@ fn test_decay_activation_with_one() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.set_activation(0.5);
     memory.decay_activation(1.0);
@@ -200,6 +208,7 @@ fn test_decay_activation_with_zero() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.set_activation(0.5);
     memory.decay_activation(0.0);
@@ -219,6 +228,7 @@ fn test_decay_formula_99_percent() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.set_activation(1.0);
     memory.decay_activation(0.99);
@@ -234,6 +244,7 @@ fn test_decay_formula_50_percent() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.set_activation(0.8);
     memory.decay_activation(0.5);
@@ -249,6 +260,7 @@ fn test_decay_then_activate() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.set_activation(1.0);
     memory.decay_activation(0.5); // 0.5
@@ -265,6 +277,7 @@ fn test_activate_then_decay() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.set_activation(0.5);
     memory.activate(0.5); // 1.0
@@ -323,8 +336,8 @@ fn test_activation_never_zero() {
 fn test_connected_memories_coactivate() {
     let (mut memory, _temp) = setup_memory_system();
 
-    let id1 = memory.record(create_experience("Memory A")).unwrap();
-    let id2 = memory.record(create_experience("Memory B")).unwrap();
+    let id1 = memory.record(create_experience("Memory A"), None).unwrap();
+    let id2 = memory.record(create_experience("Memory B"), None).unwrap();
 
     // Connect them via reinforcement
     memory
@@ -347,9 +360,15 @@ fn test_chain_activation_propagates() {
     let (mut memory, _temp) = setup_memory_system();
 
     // Create a chain: A -> B -> C
-    let id_a = memory.record(create_experience("Chain start A")).unwrap();
-    let id_b = memory.record(create_experience("Chain middle B")).unwrap();
-    let id_c = memory.record(create_experience("Chain end C")).unwrap();
+    let id_a = memory
+        .record(create_experience("Chain start A"), None)
+        .unwrap();
+    let id_b = memory
+        .record(create_experience("Chain middle B"), None)
+        .unwrap();
+    let id_c = memory
+        .record(create_experience("Chain end C"), None)
+        .unwrap();
 
     // Connect A-B
     memory
@@ -376,8 +395,12 @@ fn test_disconnected_memories_independent() {
     let (mut memory, _temp) = setup_memory_system();
 
     // Create two unconnected memories
-    let _id1 = memory.record(create_experience("Topic alpha")).unwrap();
-    let _id2 = memory.record(create_experience("Topic beta")).unwrap();
+    let _id1 = memory
+        .record(create_experience("Topic alpha"), None)
+        .unwrap();
+    let _id2 = memory
+        .record(create_experience("Topic beta"), None)
+        .unwrap();
 
     // Query for alpha - should not strongly include beta
     let query = Query {
@@ -397,13 +420,16 @@ fn test_hub_memory_activates_many() {
 
     // Create hub and spokes
     let hub = memory
-        .record(create_experience("Central hub memory"))
+        .record(create_experience("Central hub memory"), None)
         .unwrap();
     let mut spokes = Vec::new();
 
     for i in 0..5 {
         let spoke = memory
-            .record(create_experience(&format!("Spoke {} connected to hub", i)))
+            .record(
+                create_experience(&format!("Spoke {} connected to hub", i)),
+                None,
+            )
             .unwrap();
         memory
             .reinforce_retrieval(&[hub.clone(), spoke.clone()], RetrievalOutcome::Helpful)
@@ -439,6 +465,7 @@ fn test_batch_activation_update() {
                 None,
                 None,
                 None,
+                None, // created_at
             )
         })
         .collect();
@@ -467,6 +494,7 @@ fn test_batch_decay_update() {
                 None,
                 None,
                 None,
+                None, // created_at
             )
             // New memories start at activation=1.0 by default
         })
@@ -496,6 +524,7 @@ fn test_heterogeneous_activation() {
                 None,
                 None,
                 None,
+                None, // created_at
             );
             m.set_activation(0.1 * (i as f32));
             m
@@ -532,6 +561,7 @@ fn test_concurrent_activation_reads() {
         None,
         None,
         None,
+        None, // created_at
     ));
 
     let handles: Vec<_> = (0..10)
@@ -562,6 +592,7 @@ fn test_activation_after_tier_change() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     memory.set_activation(0.5);
@@ -582,6 +613,7 @@ fn test_activation_across_tier_cycle() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     memory.set_activation(0.7);
@@ -615,6 +647,7 @@ fn test_activation_very_small() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     memory.set_activation(0.0001);
@@ -634,6 +667,7 @@ fn test_activation_at_boundary() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     memory.set_activation(0.9999);
@@ -653,6 +687,7 @@ fn test_decay_very_small_factor() {
         None,
         None,
         None,
+        None, // created_at
     );
     // Memory starts at 1.0, decay by 0.9999 factor -> 0.9999
     memory.decay_activation(0.9999);
@@ -671,6 +706,7 @@ fn test_activation_negative_not_possible() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     memory.set_activation(0.1);
@@ -694,6 +730,7 @@ fn test_activation_serialization_roundtrip() {
         None,
         None,
         None,
+        None, // created_at
     );
     memory.set_activation(0.12345);
 
@@ -718,6 +755,7 @@ fn test_slow_decay_rate() {
         None,
         None,
         None,
+        None, // created_at
     );
     // Memory starts at 1.0 by default
 
@@ -741,6 +779,7 @@ fn test_fast_decay_rate() {
         None,
         None,
         None,
+        None, // created_at
     );
     // Memory starts at 1.0 by default
 
@@ -764,6 +803,7 @@ fn test_medium_decay_rate() {
         None,
         None,
         None,
+        None, // created_at
     );
     // Memory starts at 1.0 by default
 
@@ -786,13 +826,13 @@ fn test_triangle_activation() {
 
     // Create triangle: A-B, B-C, C-A
     let id_a = memory
-        .record(create_experience("Triangle vertex A"))
+        .record(create_experience("Triangle vertex A"), None)
         .unwrap();
     let id_b = memory
-        .record(create_experience("Triangle vertex B"))
+        .record(create_experience("Triangle vertex B"), None)
         .unwrap();
     let id_c = memory
-        .record(create_experience("Triangle vertex C"))
+        .record(create_experience("Triangle vertex C"), None)
         .unwrap();
 
     memory
@@ -821,11 +861,13 @@ fn test_star_activation() {
     let (mut memory, _temp) = setup_memory_system();
 
     // Create star: center connected to 5 leaves
-    let center = memory.record(create_experience("Star center")).unwrap();
+    let center = memory
+        .record(create_experience("Star center"), None)
+        .unwrap();
 
     for i in 0..5 {
         let leaf = memory
-            .record(create_experience(&format!("Star leaf {}", i)))
+            .record(create_experience(&format!("Star leaf {}", i)), None)
             .unwrap();
         memory
             .reinforce_retrieval(&[center.clone(), leaf], RetrievalOutcome::Helpful)
@@ -854,14 +896,14 @@ fn test_bipartite_activation() {
     for i in 0..3 {
         group_a.push(
             memory
-                .record(create_experience(&format!("Group A member {}", i)))
+                .record(create_experience(&format!("Group A member {}", i)), None)
                 .unwrap(),
         );
     }
     for i in 0..3 {
         group_b.push(
             memory
-                .record(create_experience(&format!("Group B member {}", i)))
+                .record(create_experience(&format!("Group B member {}", i)), None)
                 .unwrap(),
         );
     }
@@ -901,6 +943,7 @@ fn test_activation_update_performance() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     // 10000 activation updates should complete quickly
@@ -927,6 +970,7 @@ fn test_many_memories_decay() {
                 None,
                 None,
                 None,
+                None, // created_at
             )
         })
         .collect();
@@ -959,6 +1003,7 @@ fn test_activation_with_importance() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     memory.set_activation(0.5);
@@ -980,6 +1025,7 @@ fn test_activation_with_tier() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     memory.set_activation(0.5);
@@ -1001,6 +1047,7 @@ fn test_activation_with_retrieval_tracking() {
         None,
         None,
         None,
+        None, // created_at
     );
 
     memory.set_activation(0.5);

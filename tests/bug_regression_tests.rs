@@ -90,7 +90,7 @@ fn test_bug001_multiple_memories_same_day_all_retrievable() {
             entities: vec![format!("entity_{}", i)],
             ..Default::default()
         };
-        let id = system.record(exp).expect("Failed to record memory");
+        let id = system.record(exp, None).expect("Failed to record memory");
         memory_ids.push(id);
     }
 
@@ -128,7 +128,7 @@ fn test_bug001_date_search_returns_all_memories() {
     // Record 5 memories
     for i in 0..5 {
         let exp = create_experience(&format!("Date search test memory {}", i));
-        system.record(exp).expect("Failed to record");
+        system.record(exp, None).expect("Failed to record");
     }
 
     // Search by date range (today)
@@ -229,7 +229,7 @@ fn test_bug005_index_removal_is_fast() {
     // Record 100 memories to populate indices
     for i in 0..100 {
         let exp = create_experience(&format!("Index removal test memory {}", i));
-        system.record(exp).expect("Failed to record");
+        system.record(exp, None).expect("Failed to record");
     }
 
     // Now measure time to flush (which triggers index cleanup)
@@ -271,7 +271,7 @@ fn test_bug007_combined_search_scales_linearly() {
             robot_id: Some(format!("robot_{}", i % 10)),
             ..Default::default()
         };
-        system.record(exp).expect("Failed to record");
+        system.record(exp, None).expect("Failed to record");
     }
 
     // Run combined search with multiple criteria (semantic + robot_id filter)
@@ -466,7 +466,7 @@ fn test_algo004_importance_index_updates_after_change() {
         entities: vec!["neural_networks".to_string()],
         ..Default::default()
     };
-    let memory_id = system.record(exp).expect("Failed to record");
+    let memory_id = system.record(exp, None).expect("Failed to record");
 
     // Retrieve it initially
     let query = Query {
@@ -525,7 +525,7 @@ fn test_bug006_empty_query_returns_gracefully() {
     // Record some memories
     for i in 0..5 {
         let exp = create_experience(&format!("Test memory {}", i));
-        system.record(exp).expect("Failed to record");
+        system.record(exp, None).expect("Failed to record");
     }
 
     // Empty query should not crash, should return gracefully
@@ -574,7 +574,7 @@ fn test_bug004_vamana_maintains_recall_after_inserts() {
             entities: vec![topic.to_string()],
             ..Default::default()
         };
-        system.record(exp).expect("Failed to record");
+        system.record(exp, None).expect("Failed to record");
     }
 
     // Query should find relevant results
@@ -643,7 +643,7 @@ fn test_geo_filter_retrieval() {
 
     for (name, lat, lon) in locations {
         let exp = create_geo_experience(&format!("Location test: {}", name), lat, lon);
-        system.record(exp).expect("Failed to record");
+        system.record(exp, None).expect("Failed to record");
     }
 
     // Query within 1km of SF downtown - should get SF memories
@@ -684,7 +684,7 @@ fn test_sho48_forget_removes_from_semantic_search() {
         entities: vec!["quantum".to_string(), "photonic".to_string()],
         ..Default::default()
     };
-    let memory_id = system.record(exp).expect("Failed to record memory");
+    let memory_id = system.record(exp, None).expect("Failed to record memory");
 
     // Verify it's findable via semantic search
     let query = Query {
@@ -724,7 +724,7 @@ fn test_sho48_forget_updates_stats() {
 
     // Record a memory
     let exp = create_experience("Stats tracking test memory for SHO-48");
-    let memory_id = system.record(exp).expect("Failed to record memory");
+    let memory_id = system.record(exp, None).expect("Failed to record memory");
 
     let stats_before = system.stats();
 
@@ -771,7 +771,7 @@ fn test_sho49_no_duplicates_in_retrieve() {
             entities: vec!["dedup_test".to_string()],
             ..Default::default()
         };
-        let id = system.record(exp).expect("Failed to record");
+        let id = system.record(exp, None).expect("Failed to record");
         recorded_ids.insert(id);
     }
 
@@ -804,7 +804,7 @@ fn test_sho49_retrieve_count_matches_unique() {
     // Record 5 unique memories
     for i in 0..5 {
         let exp = create_experience(&format!("Unique memory {} for count test", i));
-        system.record(exp).expect("Failed to record");
+        system.record(exp, None).expect("Failed to record");
     }
 
     // Retrieve all
@@ -846,7 +846,7 @@ fn test_sho50_stats_updated_on_add() {
 
     // Record a memory
     let exp = create_experience("Stats test memory for SHO-50");
-    system.record(exp).expect("Failed to record");
+    system.record(exp, None).expect("Failed to record");
 
     let stats_after = system.stats();
 
@@ -884,7 +884,7 @@ fn test_sho50_stats_updated_on_forget() {
 
     // Record a memory
     let exp = create_experience("Memory to forget for SHO-50 stats test");
-    let memory_id = system.record(exp).expect("Failed to record");
+    let memory_id = system.record(exp, None).expect("Failed to record");
 
     let stats_before = system.stats();
 
@@ -930,7 +930,7 @@ fn test_sho50_high_importance_updates_session_count() {
         entities: vec!["architecture".to_string()],
         ..Default::default()
     };
-    system.record(exp).expect("Failed to record");
+    system.record(exp, None).expect("Failed to record");
 
     let stats_after = system.stats();
 
