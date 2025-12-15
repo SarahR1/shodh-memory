@@ -379,6 +379,7 @@ fn create_test_memories(count: usize) -> Vec<Memory> {
             None,
             None,
             None,
+            None, // created_at
         ));
     }
 

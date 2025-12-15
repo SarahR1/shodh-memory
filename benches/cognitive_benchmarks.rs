@@ -76,6 +76,7 @@ fn bench_memory_creation(c: &mut Criterion) {
                 None,
                 None,
                 None,
+                None, // created_at
             )
         });
     });
@@ -95,6 +96,7 @@ fn bench_memory_creation(c: &mut Criterion) {
                 Some("agent-1".to_string()),
                 Some("run-1".to_string()),
                 Some("actor-1".to_string()),
+                None, // created_at
             )
         });
     });
@@ -116,6 +118,7 @@ fn bench_entity_ref_operations(c: &mut Criterion) {
                     None,
                     None,
                     None,
+                    None, // created_at
                 )
             },
             |mut memory| {
@@ -144,6 +147,7 @@ fn bench_entity_ref_operations(c: &mut Criterion) {
                             None,
                             None,
                             None,
+                            None, // created_at
                         )
                     },
                     |mut memory| {
@@ -170,6 +174,7 @@ fn bench_entity_ref_operations(c: &mut Criterion) {
             None,
             None,
             None,
+            None, // created_at
         );
         for i in 0..100 {
             memory.add_entity_ref(Uuid::new_v4(), format!("e{}", i), "x".to_string());
@@ -194,6 +199,7 @@ fn bench_tier_operations(c: &mut Criterion) {
                     None,
                     None,
                     None,
+                    None, // created_at
                 )
             },
             |mut memory| {
@@ -213,6 +219,7 @@ fn bench_tier_operations(c: &mut Criterion) {
                     None,
                     None,
                     None,
+                    None, // created_at
                 );
                 m.tier = MemoryTier::Archive;
                 m
@@ -234,6 +241,7 @@ fn bench_tier_operations(c: &mut Criterion) {
                     None,
                     None,
                     None,
+                    None, // created_at
                 )
             },
             |mut memory| {
@@ -259,6 +267,7 @@ fn bench_activation_operations(c: &mut Criterion) {
             None,
             None,
             None,
+            None, // created_at
         );
         memory.set_activation(0.5);
 
@@ -275,6 +284,7 @@ fn bench_activation_operations(c: &mut Criterion) {
             None,
             None,
             None,
+            None, // created_at
         );
 
         b.iter(|| {
@@ -293,6 +303,7 @@ fn bench_activation_operations(c: &mut Criterion) {
                     None,
                     None,
                     None,
+                    None, // created_at
                 )
             })
             .collect();
@@ -322,6 +333,7 @@ fn bench_serialization(c: &mut Criterion) {
         Some("agent".to_string()),
         None,
         None,
+        None, // created_at
     );
     for i in 0..10 {
         memory.add_entity_ref(
@@ -370,10 +382,13 @@ fn bench_hebbian_reinforcement(c: &mut Criterion) {
             || {
                 let (mut memory, temp) = setup_memory_system();
                 let id = memory
-                    .record(Experience {
-                        content: "Test memory".to_string(),
-                        ..Default::default()
-                    })
+                    .record(
+                        Experience {
+                            content: "Test memory".to_string(),
+                            ..Default::default()
+                        },
+                        None,
+                    )
                     .unwrap();
                 (memory, temp, vec![id])
             },
@@ -398,10 +413,13 @@ fn bench_hebbian_reinforcement(c: &mut Criterion) {
                         let ids: Vec<_> = (0..count)
                             .map(|i| {
                                 memory
-                                    .record(Experience {
-                                        content: format!("Memory {}", i),
-                                        ..Default::default()
-                                    })
+                                    .record(
+                                        Experience {
+                                            content: format!("Memory {}", i),
+                                            ..Default::default()
+                                        },
+                                        None,
+                                    )
                                     .unwrap()
                             })
                             .collect();
@@ -472,6 +490,7 @@ fn bench_importance_operations(c: &mut Criterion) {
             None,
             None,
             None,
+            None, // created_at
         );
 
         b.iter(|| memory.importance());
@@ -485,6 +504,7 @@ fn bench_importance_operations(c: &mut Criterion) {
             None,
             None,
             None,
+            None, // created_at
         );
 
         b.iter(|| {
@@ -500,6 +520,7 @@ fn bench_importance_operations(c: &mut Criterion) {
             None,
             None,
             None,
+            None, // created_at
         );
 
         b.iter(|| {
@@ -515,6 +536,7 @@ fn bench_importance_operations(c: &mut Criterion) {
             None,
             None,
             None,
+            None, // created_at
         );
 
         b.iter(|| {
@@ -540,6 +562,7 @@ fn bench_access_patterns(c: &mut Criterion) {
             None,
             None,
             None,
+            None, // created_at
         );
 
         b.iter(|| {
@@ -555,6 +578,7 @@ fn bench_access_patterns(c: &mut Criterion) {
             None,
             None,
             None,
+            None, // created_at
         );
         for _ in 0..100 {
             memory.record_access();
@@ -571,6 +595,7 @@ fn bench_access_patterns(c: &mut Criterion) {
             None,
             None,
             None,
+            None, // created_at
         );
 
         b.iter(|| {
@@ -602,6 +627,7 @@ fn bench_concurrent_memory_ops(c: &mut Criterion) {
                     None,
                     None,
                     None,
+                    None, // created_at
                 ))
             },
             |memory| {
