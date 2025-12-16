@@ -22,6 +22,15 @@ Features:
 - Anomaly detection - Track unusual sensor readings
 - Pattern learning - Match situations to learned patterns
 - 100% offline operation - No cloud, no API keys
+
+LLM Framework Integrations:
+    # LangChain - pip install shodh-memory[langchain]
+    from shodh_memory.integrations.langchain import ShodhMemory
+
+    # LlamaIndex - pip install shodh-memory[llamaindex]
+    from shodh_memory.integrations.llamaindex import ShodhLlamaMemory
+
+    # Both - pip install shodh-memory[all]
 """
 
 from .shodh_memory import (

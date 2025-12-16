@@ -110,6 +110,15 @@ Config file locations:
 **Python:**
 ```
 pip install shodh-memory
+
+# With LangChain support
+pip install shodh-memory[langchain]
+
+# With LlamaIndex support
+pip install shodh-memory[llamaindex]
+
+# All integrations
+pip install shodh-memory[all]
 ```
 
 **From source:**
@@ -138,6 +147,55 @@ results = memory.recall("user preferences", limit=5)
 summary = memory.context_summary()
 # Returns: decisions, learnings, patterns, errors
 ```
+
+**LangChain**
+
+```python
+from langchain.chains import ConversationChain
+from langchain_openai import ChatOpenAI
+from shodh_memory.integrations.langchain import ShodhMemory
+
+memory = ShodhMemory(
+    server_url="http://localhost:3030",
+    user_id="agent-1",
+    api_key="your-key"
+)
+
+chain = ConversationChain(llm=ChatOpenAI(), memory=memory)
+response = chain.invoke({"input": "Hello!"})
+
+# Memory is automatically loaded/saved per interaction
+# Sub-millisecond retrieval, no LLM calls for memory ops
+```
+
+**LlamaIndex**
+
+```python
+from shodh_memory.integrations.llamaindex import ShodhLlamaMemory
+
+memory = ShodhLlamaMemory(
+    server_url="http://localhost:3030",
+    user_id="agent-1",
+    api_key="your-key"
+)
+
+# Store memories
+memory.put("User prefers Python", memory_type="Decision")
+
+# Retrieve by semantic search
+results = memory.get("programming preferences")
+
+# Get formatted context for prompts
+context = memory.get_context("current task query")
+```
+
+**ChatGPT (Custom GPT Actions)**
+
+Use the OpenAPI spec at `/openapi.yaml` to create a Custom GPT with memory:
+
+1. Create a Custom GPT at https://chat.openai.com/gpts/editor
+2. Add an Action with the OpenAPI spec from your server
+3. The GPT can now store and recall memories across sessions
 
 **REST API**
 

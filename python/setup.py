@@ -9,7 +9,7 @@ long_description = readme_file.read_text() if readme_file.exists() else ""
 
 setup(
     name="shodh-memory",
-    version="0.1.4",
+    version="0.1.5",
     author="Shodh Team",
     author_email="29.varuns@gmail.com",
     description="Cognitive memory system for AI agents - biological memory processing in a single binary",
@@ -35,11 +35,21 @@ setup(
         "requests>=2.28.0",
     ],
     extras_require={
+        "langchain": [
+            "langchain-core>=0.2.0",
+        ],
+        "llamaindex": [
+            "llama-index-core>=0.10.0",
+        ],
+        "all": [
+            "langchain-core>=0.2.0",
+            "llama-index-core>=0.10.0",
+        ],
         "dev": [
             "pytest>=7.0.0",
             "black>=22.0.0",
             "mypy>=0.990",
-        ]
+        ],
     },
     include_package_data=True,
     package_data={
