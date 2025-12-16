@@ -5,7 +5,7 @@
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
-use rocksdb::{Options, DB};
+use rocksdb::{Options, WriteBatch, DB};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -394,6 +394,10 @@ pub struct GraphMemory {
 
     /// Episode count - initialized on startup, updated on add
     episode_count: Arc<AtomicUsize>,
+
+    /// Mutex for serializing synapse updates to prevent race conditions (SHO-64)
+    /// Uses parking_lot::Mutex for better performance than std::sync::Mutex
+    synapse_update_lock: Arc<parking_lot::Mutex<()>>,
 }
 
 impl GraphMemory {
@@ -443,6 +447,7 @@ impl GraphMemory {
             entity_count: Arc::new(AtomicUsize::new(entity_count)),
             relationship_count: Arc::new(AtomicUsize::new(relationship_count)),
             episode_count: Arc::new(AtomicUsize::new(episode_count)),
+            synapse_update_lock: Arc::new(parking_lot::Mutex::new(())),
         };
 
         if entity_count > 0 || relationship_count > 0 || episode_count > 0 {
@@ -887,11 +892,19 @@ impl GraphMemory {
             current_level = next_level;
         }
 
-        // Apply Hebbian strengthening to all traversed edges
+        // Apply Hebbian strengthening to all traversed edges atomically (SHO-65)
         // "Neurons that fire together, wire together"
-        for edge_uuid in edges_to_strengthen {
-            if let Err(e) = self.strengthen_synapse(&edge_uuid) {
-                tracing::debug!("Failed to strengthen synapse {}: {}", edge_uuid, e);
+        // Uses batch update for efficiency instead of individual writes
+        if !edges_to_strengthen.is_empty() {
+            match self.batch_strengthen_synapses(&edges_to_strengthen) {
+                Ok(count) => {
+                    if count > 0 {
+                        tracing::trace!("Strengthened {} synapses during traversal", count);
+                    }
+                }
+                Err(e) => {
+                    tracing::debug!("Failed to batch strengthen synapses: {}", e);
+                }
             }
         }
 
@@ -918,7 +931,12 @@ impl GraphMemory {
     ///
     /// Called when an edge is traversed during memory retrieval.
     /// Implements "neurons that fire together, wire together".
+    ///
+    /// Uses a mutex to prevent race conditions during concurrent updates (SHO-64).
     pub fn strengthen_synapse(&self, edge_uuid: &Uuid) -> Result<()> {
+        // Lock to prevent concurrent read-modify-write race conditions
+        let _guard = self.synapse_update_lock.lock();
+
         if let Some(mut edge) = self.get_relationship(edge_uuid)? {
             edge.strengthen();
 
@@ -930,10 +948,57 @@ impl GraphMemory {
         Ok(())
     }
 
+    /// Batch strengthen multiple synapses atomically (SHO-65)
+    ///
+    /// More efficient than calling strengthen_synapse individually for each edge.
+    /// Uses RocksDB WriteBatch for atomic multi-write and a single lock acquisition.
+    ///
+    /// Returns the number of synapses successfully strengthened.
+    pub fn batch_strengthen_synapses(&self, edge_uuids: &[Uuid]) -> Result<usize> {
+        if edge_uuids.is_empty() {
+            return Ok(0);
+        }
+
+        // Single lock acquisition for entire batch
+        let _guard = self.synapse_update_lock.lock();
+
+        let mut batch = WriteBatch::default();
+        let mut strengthened = 0;
+
+        for edge_uuid in edge_uuids {
+            if let Some(mut edge) = self.get_relationship(edge_uuid)? {
+                edge.strengthen();
+
+                let key = edge.uuid.as_bytes();
+                match bincode::serialize(&edge) {
+                    Ok(value) => {
+                        batch.put(key, value);
+                        strengthened += 1;
+                    }
+                    Err(e) => {
+                        tracing::debug!("Failed to serialize edge {}: {}", edge_uuid, e);
+                    }
+                }
+            }
+        }
+
+        // Atomic write of all updates
+        if strengthened > 0 {
+            self.relationships_db.write(batch)?;
+        }
+
+        Ok(strengthened)
+    }
+
     /// Apply decay to a synapse
     ///
     /// Returns true if the synapse should be pruned (non-potentiated and below threshold)
+    ///
+    /// Uses a mutex to prevent race conditions during concurrent updates (SHO-64).
     pub fn decay_synapse(&self, edge_uuid: &Uuid) -> Result<bool> {
+        // Lock to prevent concurrent read-modify-write race conditions
+        let _guard = self.synapse_update_lock.lock();
+
         if let Some(mut edge) = self.get_relationship(edge_uuid)? {
             let should_prune = edge.decay();
 
@@ -945,6 +1010,45 @@ impl GraphMemory {
         }
 
         Ok(false)
+    }
+
+    /// Batch decay multiple synapses atomically
+    ///
+    /// Returns a vector of edge UUIDs that should be pruned.
+    pub fn batch_decay_synapses(&self, edge_uuids: &[Uuid]) -> Result<Vec<Uuid>> {
+        if edge_uuids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Single lock acquisition for entire batch
+        let _guard = self.synapse_update_lock.lock();
+
+        let mut batch = WriteBatch::default();
+        let mut to_prune = Vec::new();
+
+        for edge_uuid in edge_uuids {
+            if let Some(mut edge) = self.get_relationship(edge_uuid)? {
+                let should_prune = edge.decay();
+
+                let key = edge.uuid.as_bytes();
+                match bincode::serialize(&edge) {
+                    Ok(value) => {
+                        batch.put(key, value);
+                        if should_prune {
+                            to_prune.push(*edge_uuid);
+                        }
+                    }
+                    Err(e) => {
+                        tracing::debug!("Failed to serialize edge {}: {}", edge_uuid, e);
+                    }
+                }
+            }
+        }
+
+        // Atomic write of all updates
+        self.relationships_db.write(batch)?;
+
+        Ok(to_prune)
     }
 
     /// Get graph statistics - O(1) using atomic counters
