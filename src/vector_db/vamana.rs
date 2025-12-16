@@ -511,17 +511,60 @@ impl VamanaIndex {
         }
     }
 
+    /// Get vector slice by ID from storage reference (zero-copy, no allocation)
+    ///
+    /// This is the performance-critical path for search operations.
+    /// Returns a borrowed slice instead of cloning the vector data.
+    #[inline]
+    fn get_slice_from_storage(storage: &VectorStorage, id: u32) -> Result<&[f32]> {
+        match storage {
+            VectorStorage::Memory(vecs) => vecs
+                .get(id as usize)
+                .map(|v| v.as_slice())
+                .ok_or_else(|| anyhow!("Vector {id} not found")),
+            VectorStorage::Mmap {
+                mmap,
+                dimension,
+                num_vectors,
+            } => {
+                if id as usize >= *num_vectors {
+                    return Err(anyhow!(
+                        "Vector {id} out of bounds (num_vectors={})",
+                        num_vectors
+                    ));
+                }
+                let start = id as usize * dimension;
+                let end = start + dimension;
+                let ptr = mmap.as_ptr();
+                let total_floats = mmap.len() / std::mem::size_of::<f32>();
+                if end > total_floats {
+                    return Err(anyhow!("Vector slice bounds exceed mmap capacity"));
+                }
+                // SAFETY: Pointer alignment verified during store_vectors().
+                // Bounds checked above. Mmap lifetime outlives returned slice.
+                let float_slice =
+                    unsafe { std::slice::from_raw_parts(ptr as *const f32, total_floats) };
+                Ok(&float_slice[start..end])
+            }
+        }
+    }
+
     /// Greedy search for nearest neighbors
+    ///
+    /// Optimized to use zero-copy slice access for vector data.
+    /// Holds both graph and vector storage locks for the duration of the search
+    /// to avoid per-neighbor lock acquisition overhead.
     fn greedy_search(&self, query: &[f32], k: usize, entry: u32) -> Result<Vec<SearchCandidate>> {
         let graph = self.graph.read();
+        let storage = self.vectors.read(); // Hold lock for entire search (zero-copy access)
 
         let mut visited = HashSet::new();
         let mut candidates = BinaryHeap::new();
         let mut w = BinaryHeap::new();
 
-        // Start from entry point
-        let entry_vec = self.get_vector(entry)?;
-        let entry_dist = self.distance(query, &entry_vec);
+        // Start from entry point (zero-copy slice access)
+        let entry_slice = Self::get_slice_from_storage(&storage, entry)?;
+        let entry_dist = self.distance(query, entry_slice);
 
         candidates.push(Reverse(SearchCandidate {
             id: entry,
@@ -559,8 +602,9 @@ impl VamanaIndex {
 
                 visited.insert(neighbor_id);
 
-                let neighbor_vec = self.get_vector(neighbor_id)?;
-                let dist = self.distance(query, &neighbor_vec);
+                // Zero-copy slice access - no allocation per neighbor
+                let neighbor_slice = Self::get_slice_from_storage(&storage, neighbor_id)?;
+                let dist = self.distance(query, neighbor_slice);
 
                 // Defensive: check if closer than worst in w, or w not yet full
                 let should_add = w.len() < k || w.peek().map(|p| dist < p.distance).unwrap_or(true);
@@ -593,13 +637,16 @@ impl VamanaIndex {
     }
 
     /// Robust prune using α-RNG strategy
+    ///
+    /// Optimized to use zero-copy slice access for vector data during build.
     fn robust_prune(&self, node_id: u32, candidates: &[SearchCandidate]) -> Result<Vec<u32>> {
         if candidates.is_empty() {
             return Ok(Vec::new());
         }
 
+        let storage = self.vectors.read(); // Hold lock for entire prune operation
         let mut pruned = Vec::new();
-        let node_vec = self.get_vector(node_id)?;
+        let node_slice = Self::get_slice_from_storage(&storage, node_id)?;
 
         // Sort candidates by distance (NaN values sort to end)
         let mut sorted_candidates = candidates.to_vec();
@@ -614,15 +661,15 @@ impl VamanaIndex {
                 continue;
             }
 
-            // Check α-RNG condition
-            let candidate_vec = self.get_vector(candidate.id)?;
-            let dist_nc = self.distance(&node_vec, &candidate_vec);
+            // Check α-RNG condition (zero-copy slice access)
+            let candidate_slice = Self::get_slice_from_storage(&storage, candidate.id)?;
+            let dist_nc = self.distance(node_slice, candidate_slice);
 
             let mut should_add = true;
             for &existing_id in &pruned {
-                let existing_vec = self.get_vector(existing_id)?;
-                let dist_ne = self.distance(&node_vec, &existing_vec);
-                let dist_ce = self.distance(&candidate_vec, &existing_vec);
+                let existing_slice = Self::get_slice_from_storage(&storage, existing_id)?;
+                let dist_ne = self.distance(node_slice, existing_slice);
+                let dist_ce = self.distance(candidate_slice, existing_slice);
 
                 // α-RNG pruning condition
                 if self.config.alpha * dist_ce <= dist_nc && dist_ce <= dist_ne {
