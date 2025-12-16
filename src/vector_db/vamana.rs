@@ -103,6 +103,10 @@ pub(crate) struct VamanaNode {
 /// Threshold for recommending index rebuild (number of incremental inserts)
 pub const REBUILD_THRESHOLD: usize = 10_000;
 
+/// Threshold for recommending index rebuild based on deletion ratio
+/// When 30% or more of vectors are soft-deleted, compaction is recommended
+pub const DELETION_RATIO_THRESHOLD: f32 = 0.30;
+
 /// Main Vamana index
 pub struct VamanaIndex {
     pub(crate) config: VamanaConfig,
@@ -713,6 +717,20 @@ impl VamanaIndex {
         self.deleted_ids.read().len()
     }
 
+    /// Get the deletion ratio (deleted / total vectors)
+    /// Returns 0.0 if index is empty
+    pub fn deletion_ratio(&self) -> f32 {
+        if self.num_vectors == 0 {
+            return 0.0;
+        }
+        self.deleted_count() as f32 / self.num_vectors as f32
+    }
+
+    /// Check if compaction is needed based on deletion ratio
+    pub fn needs_compaction(&self) -> bool {
+        self.deletion_ratio() >= DELETION_RATIO_THRESHOLD
+    }
+
     /// Clear all deleted markers (use after rebuild)
     pub fn clear_deleted(&self) {
         self.deleted_ids.write().clear();
@@ -822,13 +840,21 @@ impl VamanaIndex {
 
     /// Check if index rebuild is recommended for optimal search quality
     ///
-    /// Returns true when incremental inserts exceed REBUILD_THRESHOLD (10,000).
+    /// Returns true when:
+    /// - Incremental inserts exceed REBUILD_THRESHOLD (10,000), OR
+    /// - Deletion ratio exceeds DELETION_RATIO_THRESHOLD (30%)
+    ///
     /// Incremental inserts use simplified neighbor pruning which can degrade
-    /// recall@10 by 5-15% over time.
+    /// recall@10 by 5-15% over time. High deletion ratios waste memory and
+    /// slow down search (must filter more orphaned entries).
     pub fn needs_rebuild(&self) -> bool {
-        self.incremental_inserts
+        let needs_insert_rebuild = self
+            .incremental_inserts
             .load(std::sync::atomic::Ordering::Relaxed)
-            >= REBUILD_THRESHOLD
+            >= REBUILD_THRESHOLD;
+        let needs_compaction = self.needs_compaction();
+
+        needs_insert_rebuild || needs_compaction
     }
 
     /// Get the number of incremental inserts since last rebuild
@@ -862,6 +888,45 @@ impl VamanaIndex {
                 };
 
                 for i in 0..*num_vectors {
+                    let start = i * dimension;
+                    let end = start + dimension;
+                    if end <= total_floats {
+                        vecs.push(float_slice[start..end].to_vec());
+                    }
+                }
+                vecs
+            }
+        }
+    }
+
+    /// Extract only live (non-deleted) vectors for compaction rebuild
+    ///
+    /// Returns vectors that are NOT marked as deleted.
+    /// Use this for compaction to physically remove deleted vectors.
+    pub fn extract_live_vectors(&self) -> Vec<Vec<f32>> {
+        let deleted = self.deleted_ids.read();
+        match &*self.vectors.read() {
+            VectorStorage::Memory(vecs) => vecs
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !deleted.contains(&(*i as u32)))
+                .map(|(_, v)| v.clone())
+                .collect(),
+            VectorStorage::Mmap {
+                mmap,
+                dimension,
+                num_vectors,
+            } => {
+                let total_floats = mmap.len() / std::mem::size_of::<f32>();
+                let float_slice = unsafe {
+                    std::slice::from_raw_parts(mmap.as_ptr() as *const f32, total_floats)
+                };
+
+                let mut vecs = Vec::with_capacity(num_vectors - deleted.len());
+                for i in 0..*num_vectors {
+                    if deleted.contains(&(i as u32)) {
+                        continue;
+                    }
                     let start = i * dimension;
                     let end = start + dimension;
                     if end <= total_floats {
@@ -915,6 +980,7 @@ impl VamanaIndex {
     /// Returns true if rebuild was performed, false if not needed or already in progress.
     ///
     /// Uses compare-and-swap to ensure only one rebuild occurs even with concurrent calls.
+    /// Compacts deleted vectors by extracting only live vectors.
     pub fn auto_rebuild_if_needed(&mut self) -> Result<bool> {
         if !self.needs_rebuild() {
             return Ok(false);
@@ -936,13 +1002,33 @@ impl VamanaIndex {
             return Ok(false);
         }
 
+        // Log reason for rebuild
+        let deleted_count = self.deleted_count();
+        let deletion_ratio = self.deletion_ratio();
+        if deletion_ratio >= DELETION_RATIO_THRESHOLD {
+            info!(
+                "Compacting index: {} deleted vectors ({:.1}% of {})",
+                deleted_count,
+                deletion_ratio * 100.0,
+                self.num_vectors
+            );
+        }
+
         // We acquired the rebuild lock - perform rebuild
+        // Use extract_live_vectors to compact deleted entries
         let result = (|| {
-            let vectors = self.extract_all_vectors();
+            let vectors = self.extract_live_vectors();
+            let compacted = deleted_count;
             if vectors.is_empty() {
+                self.clear_deleted();
                 return Ok(false);
             }
             self.rebuild_from_vectors(vectors)?;
+            // Clear deleted markers after successful rebuild
+            self.clear_deleted();
+            if compacted > 0 {
+                info!("Compaction complete: removed {} deleted vectors", compacted);
+            }
             Ok(true)
         })();
 

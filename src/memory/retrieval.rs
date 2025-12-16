@@ -903,8 +903,12 @@ impl RetrievalEngine {
         IndexHealth {
             total_vectors: index.len(),
             incremental_inserts: index.incremental_insert_count(),
+            deleted_count: index.deleted_count(),
+            deletion_ratio: index.deletion_ratio(),
             needs_rebuild: index.needs_rebuild(),
+            needs_compaction: index.needs_compaction(),
             rebuild_threshold: crate::vector_db::vamana::REBUILD_THRESHOLD,
+            deletion_ratio_threshold: crate::vector_db::vamana::DELETION_RATIO_THRESHOLD,
         }
     }
 }
@@ -914,8 +918,12 @@ impl RetrievalEngine {
 pub struct IndexHealth {
     pub total_vectors: usize,
     pub incremental_inserts: usize,
+    pub deleted_count: usize,
+    pub deletion_ratio: f32,
     pub needs_rebuild: bool,
+    pub needs_compaction: bool,
     pub rebuild_threshold: usize,
+    pub deletion_ratio_threshold: f32,
 }
 
 // ============================================================================

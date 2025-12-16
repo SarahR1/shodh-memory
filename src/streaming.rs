@@ -189,6 +189,42 @@ fn default_trigger_events() -> Vec<String> {
     ]
 }
 
+// Validation bounds to prevent DoS via malformed configs
+const MIN_CHECKPOINT_INTERVAL_MS: u64 = 100; // Minimum 100ms to prevent tight loops
+const MAX_CHECKPOINT_INTERVAL_MS: u64 = 3600_000; // Maximum 1 hour
+const MAX_BUFFER_SIZE: usize = 10_000; // Maximum 10k messages to prevent memory exhaustion
+const MAX_TRIGGER_EVENTS: usize = 100; // Maximum trigger event types
+
+impl ExtractionConfig {
+    /// Validate and clamp config values to sane ranges
+    /// This prevents DoS attacks via malformed configurations
+    pub fn validate_and_clamp(&mut self) {
+        // Clamp importance to [0.0, 1.0]
+        self.min_importance = self.min_importance.clamp(0.0, 1.0);
+
+        // Clamp dedupe threshold to [0.0, 1.0]
+        self.dedupe_threshold = self.dedupe_threshold.clamp(0.0, 1.0);
+
+        // Clamp checkpoint interval (0 disables, otherwise min 100ms, max 1 hour)
+        if self.checkpoint_interval_ms > 0 {
+            self.checkpoint_interval_ms = self
+                .checkpoint_interval_ms
+                .clamp(MIN_CHECKPOINT_INTERVAL_MS, MAX_CHECKPOINT_INTERVAL_MS);
+        }
+
+        // Clamp buffer size
+        if self.max_buffer_size == 0 {
+            self.max_buffer_size = default_max_buffer_size();
+        }
+        self.max_buffer_size = self.max_buffer_size.min(MAX_BUFFER_SIZE);
+
+        // Limit trigger events
+        if self.trigger_events.len() > MAX_TRIGGER_EVENTS {
+            self.trigger_events.truncate(MAX_TRIGGER_EVENTS);
+        }
+    }
+}
+
 impl Default for ExtractionConfig {
     fn default() -> Self {
         Self {
@@ -444,12 +480,16 @@ impl StreamSession {
             .session_id
             .unwrap_or_else(|| Uuid::new_v4().to_string());
 
+        // Validate and clamp config to prevent DoS via malformed values
+        let mut config = handshake.extraction_config;
+        config.validate_and_clamp();
+
         let now = Utc::now();
         Self {
             session_id,
             user_id: handshake.user_id,
             mode: handshake.mode,
-            config: handshake.extraction_config,
+            config,
             metadata: handshake.metadata,
             buffer: VecDeque::with_capacity(64),
             last_extraction: now,

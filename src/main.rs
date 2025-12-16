@@ -872,6 +872,11 @@ impl MultiUserMemoryManager {
 
         total_processed
     }
+
+    /// Get the streaming extractor for session management
+    pub fn streaming_extractor(&self) -> &Arc<streaming::StreamingMemoryExtractor> {
+        &self.streaming_extractor
+    }
 }
 
 /// API request/response types
@@ -5986,6 +5991,14 @@ async fn main() -> Result<()> {
 
         loop {
             interval.tick().await;
+
+            // Clean up stale streaming sessions (async operation)
+            // This prevents memory leaks from abandoned WebSocket connections
+            let extractor = manager_for_maintenance.streaming_extractor().clone();
+            let cleaned = extractor.cleanup_stale_sessions().await;
+            if cleaned > 0 {
+                tracing::debug!("Session cleanup: removed {} stale sessions", cleaned);
+            }
 
             // Run maintenance + periodic flush in blocking thread pool
             // This ensures durability in async write mode (data flushed every maintenance cycle)
