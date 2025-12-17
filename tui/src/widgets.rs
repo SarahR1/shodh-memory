@@ -1246,7 +1246,12 @@ fn render_graph_map(f: &mut Frame, area: Rect, state: &AppState) {
         ))
         .title(
             block::Title::from(Span::styled(
-                format!(" density:{:.2} ", state.graph_stats.density),
+                format!(
+                    " {}n {}e d:{:.2} ",
+                    state.graph_data.nodes.len(),
+                    state.graph_data.edges.len(),
+                    state.graph_stats.density
+                ),
                 Style::default().fg(Color::Yellow),
             ))
             .alignment(Alignment::Right),
@@ -1268,49 +1273,86 @@ fn render_graph_map(f: &mut Frame, area: Rect, state: &AppState) {
         let height = map_inner.height as usize;
         let mut grid: Vec<Vec<(char, Color)>> = vec![vec![(' ', Color::DarkGray); width]; height];
 
-        // Place nodes on grid based on their x,y positions
+        // Draw edges FIRST so nodes appear on top (Bresenham-style)
+        for edge in &state.graph_data.edges {
+            if let (Some(from), Some(to)) = (
+                state.graph_data.nodes.iter().find(|n| n.id == edge.from_id),
+                state.graph_data.nodes.iter().find(|n| n.id == edge.to_id),
+            ) {
+                let x1 = ((from.x * (width - 4) as f32) as i32 + 2).min(width as i32 - 3);
+                let y1 = ((from.y * (height - 2) as f32) as i32 + 1).min(height as i32 - 2);
+                let x2 = ((to.x * (width - 4) as f32) as i32 + 2).min(width as i32 - 3);
+                let y2 = ((to.y * (height - 2) as f32) as i32 + 1).min(height as i32 - 2);
+
+                let edge_color = if edge.weight >= 0.7 {
+                    Color::Green
+                } else if edge.weight >= 0.4 {
+                    Color::Yellow
+                } else {
+                    Color::Rgb(60, 60, 80)
+                };
+
+                // Bresenham's line algorithm
+                let dx = (x2 - x1).abs();
+                let dy = -(y2 - y1).abs();
+                let sx = if x1 < x2 { 1 } else { -1 };
+                let sy = if y1 < y2 { 1 } else { -1 };
+                let mut err = dx + dy;
+                let mut x = x1;
+                let mut y = y1;
+
+                loop {
+                    if x >= 0 && y >= 0 && (y as usize) < height && (x as usize) < width {
+                        let ux = x as usize;
+                        let uy = y as usize;
+                        // Don't overwrite nodes, only empty spaces
+                        if grid[uy][ux].0 == ' ' {
+                            let ch = if dx > dy.abs() * 2 {
+                                '─'
+                            } else if dy.abs() > dx * 2 {
+                                '│'
+                            } else if (sx > 0) == (sy > 0) {
+                                '╲'
+                            } else {
+                                '╱'
+                            };
+                            grid[uy][ux] = (ch, edge_color);
+                        }
+                    }
+                    if x == x2 && y == y2 {
+                        break;
+                    }
+                    let e2 = 2 * err;
+                    if e2 >= dy {
+                        err += dy;
+                        x += sx;
+                    }
+                    if e2 <= dx {
+                        err += dx;
+                        y += sy;
+                    }
+                }
+            }
+        }
+
+        // Place nodes on grid AFTER edges so they appear on top
         for (i, node) in state.graph_data.nodes.iter().enumerate() {
             let x = ((node.x * (width - 4) as f32) as usize + 2).min(width - 3);
             let y = ((node.y * (height - 2) as f32) as usize + 1).min(height - 2);
             let is_selected = i == state.graph_data.selected_node;
-            let symbol = if is_selected { '^' } else { 'o' };
+            let symbol = if is_selected { '◉' } else { '●' };
             let color = match node.memory_type.to_lowercase().as_str() {
                 "learning" => Color::Green,
                 "context" => Color::Cyan,
                 "decision" => Color::Yellow,
                 "error" => Color::Red,
                 "task" => Color::Blue,
+                "discovery" => Color::Magenta,
+                "pattern" => Color::LightCyan,
                 _ => Color::White,
             };
             if y < height && x < width {
                 grid[y][x] = (symbol, if is_selected { Color::Yellow } else { color });
-            }
-        }
-
-        // Draw edges as lines between connected nodes
-        for edge in &state.graph_data.edges {
-            if let (Some(from), Some(to)) = (
-                state.graph_data.nodes.iter().find(|n| n.id == edge.from_id),
-                state.graph_data.nodes.iter().find(|n| n.id == edge.to_id),
-            ) {
-                let x1 = ((from.x * (width - 4) as f32) as usize + 2).min(width - 3);
-                let y1 = ((from.y * (height - 2) as f32) as usize + 1).min(height - 2);
-                let x2 = ((to.x * (width - 4) as f32) as usize + 2).min(width - 3);
-                let y2 = ((to.y * (height - 2) as f32) as usize + 1).min(height - 2);
-
-                // Simple line drawing (just midpoint for now)
-                let mx = (x1 + x2) / 2;
-                let my = (y1 + y2) / 2;
-                if my < height && mx < width && grid[my][mx].0 == ' ' {
-                    let edge_color = if edge.weight >= 0.7 {
-                        Color::Green
-                    } else if edge.weight >= 0.4 {
-                        Color::Yellow
-                    } else {
-                        Color::DarkGray
-                    };
-                    grid[my][mx] = ('.', edge_color);
-                }
             }
         }
 
