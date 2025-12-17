@@ -12,7 +12,7 @@ use axum::{
 };
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::signal;
@@ -83,7 +83,7 @@ pub struct MemoryEvent {
 /// Helper struct for audit log rotation (allows spawn_blocking with minimal clone)
 struct MultiUserMemoryManagerRotationHelper {
     audit_db: Arc<rocksdb::DB>,
-    audit_logs: Arc<DashMap<String, Arc<parking_lot::RwLock<Vec<AuditEvent>>>>>,
+    audit_logs: Arc<DashMap<String, Arc<parking_lot::RwLock<VecDeque<AuditEvent>>>>>,
     /// Audit retention days (from config)
     audit_retention_days: i64,
     /// Max audit entries per user (from config)
@@ -159,9 +159,10 @@ impl MultiUserMemoryManagerRotationHelper {
                 });
 
                 // If still too many, keep only the newest ones
-                if log_guard.len() > self.audit_max_entries {
-                    log_guard.sort_by(|a, b| b.timestamp.cmp(&a.timestamp));
-                    log_guard.truncate(self.audit_max_entries);
+                // VecDeque maintains insertion order (oldest at front, newest at back)
+                // so pop_front() removes oldest entries - O(1) per pop
+                while log_guard.len() > self.audit_max_entries {
+                    log_guard.pop_front();
                 }
             }
         }
@@ -177,7 +178,8 @@ pub struct MultiUserMemoryManager {
     user_memories: moka::sync::Cache<String, Arc<parking_lot::RwLock<MemorySystem>>>,
 
     /// Per-user audit logs (enterprise feature - in-memory cache)
-    audit_logs: Arc<DashMap<String, Arc<parking_lot::RwLock<Vec<AuditEvent>>>>>,
+    /// Uses VecDeque for O(1) rotation (push_back + pop_front)
+    audit_logs: Arc<DashMap<String, Arc<parking_lot::RwLock<VecDeque<AuditEvent>>>>>,
 
     /// Persistent audit log storage
     audit_db: Arc<rocksdb::DB>,
@@ -344,14 +346,16 @@ impl MultiUserMemoryManager {
         let max_entries = self.server_config.audit_max_entries_per_user;
         if let Some(log) = self.audit_logs.get(user_id) {
             let mut entries = log.write();
-            entries.push(event);
-            // Enforce in-memory size cap: remove oldest entries if over limit
-            if entries.len() > max_entries {
-                let excess = entries.len() - max_entries;
-                entries.drain(0..excess);
+            entries.push_back(event); // O(1) amortized
+                                      // Enforce in-memory size cap: remove oldest entries if over limit
+                                      // Using pop_front() is O(1) vs drain(0..n) which is O(n)
+            while entries.len() > max_entries {
+                entries.pop_front();
             }
         } else {
-            let log = Arc::new(parking_lot::RwLock::new(vec![event]));
+            let mut deque = VecDeque::new();
+            deque.push_back(event);
+            let log = Arc::new(parking_lot::RwLock::new(deque));
             self.audit_logs.insert(user_id.to_string(), log);
         }
 
@@ -413,7 +417,8 @@ impl MultiUserMemoryManager {
                         .cloned()
                         .collect()
                 } else {
-                    events.clone()
+                    // Convert VecDeque to Vec for return
+                    events.iter().cloned().collect()
                 };
             }
         }
@@ -437,9 +442,9 @@ impl MultiUserMemoryManager {
             }
         }
 
-        // Update cache for next time
+        // Update cache for next time (convert Vec to VecDeque)
         if !events.is_empty() {
-            let log = Arc::new(parking_lot::RwLock::new(events.clone()));
+            let log = Arc::new(parking_lot::RwLock::new(VecDeque::from(events.clone())));
             self.audit_logs.insert(user_id.to_string(), log);
         }
 
