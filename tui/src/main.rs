@@ -675,13 +675,16 @@ fn parse_recall_response(data: serde_json::Value) -> Result<Vec<types::SearchRes
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let content = mem
-            .get("content")
+
+        // Fields are nested inside "experience" object
+        let experience = mem.get("experience");
+        let content = experience
+            .and_then(|e| e.get("content"))
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string();
-        let memory_type = mem
-            .get("memory_type")
+        let memory_type = experience
+            .and_then(|e| e.get("memory_type"))
             .and_then(|v| v.as_str())
             .unwrap_or("Unknown")
             .to_string();
@@ -696,8 +699,9 @@ fn parse_recall_response(data: serde_json::Value) -> Result<Vec<types::SearchRes
             .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
             .map(|dt| dt.with_timezone(&chrono::Utc))
             .unwrap_or_else(chrono::Utc::now);
-        let tags = mem
-            .get("tags")
+        // Tags are inside experience.tags
+        let tags = experience
+            .and_then(|e| e.get("tags"))
             .and_then(|v| v.as_array())
             .map(|arr| {
                 arr.iter()
