@@ -1,7 +1,8 @@
 use anyhow::Result;
 use crossterm::{
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
+        MouseEventKind,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -22,7 +23,7 @@ mod widgets;
 
 use logo::ELEPHANT;
 use stream::MemoryStream;
-use types::{AppState, ViewMode};
+use types::{AppState, SearchMode, ViewMode};
 use widgets::{render_footer, render_header, render_main};
 
 struct UserSelector {
@@ -289,6 +290,15 @@ async fn run_tui(state: Arc<Mutex<AppState>>) -> Result<()> {
     let tick_rate = Duration::from_millis(100);
     let mut last_tick = Instant::now();
 
+    // Clone state for search API calls
+    let search_state = Arc::clone(&state);
+    let base_url = std::env::var("SHODH_SERVER_URL")
+        .unwrap_or_else(|_| "http://127.0.0.1:3030".to_string())
+        .trim_end_matches("/api/events")
+        .to_string();
+    let api_key = std::env::var("SHODH_API_KEY")
+        .unwrap_or_else(|_| "sk-shodh-dev-local-testing-key".to_string());
+
     loop {
         {
             let g = state.lock().await;
@@ -298,13 +308,107 @@ async fn run_tui(state: Arc<Mutex<AppState>>) -> Result<()> {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     let mut g = state.lock().await;
+
+                    // Handle search mode input
+                    if g.search_active {
+                        match key.code {
+                            KeyCode::Esc => {
+                                g.cancel_search();
+                            }
+                            KeyCode::Enter => {
+                                if !g.search_query.is_empty() {
+                                    let query = g.search_query.clone();
+                                    let mode = g.search_mode;
+                                    let user_id = g.current_user.clone();
+                                    g.search_loading = true;
+                                    drop(g);
+
+                                    // Execute search API call
+                                    let results =
+                                        execute_search(&base_url, &api_key, &user_id, &query, mode)
+                                            .await;
+
+                                    let mut g = search_state.lock().await;
+                                    match results {
+                                        Ok(r) => g.set_search_results(r),
+                                        Err(e) => {
+                                            g.set_error(format!("Search failed: {}", e));
+                                            g.search_loading = false;
+                                        }
+                                    }
+                                }
+                            }
+                            KeyCode::Tab => {
+                                g.cycle_search_mode();
+                            }
+                            KeyCode::Backspace => {
+                                g.search_query.pop();
+                            }
+                            KeyCode::Up => {
+                                if g.search_results_visible {
+                                    g.search_select_prev();
+                                }
+                            }
+                            KeyCode::Down => {
+                                if g.search_results_visible {
+                                    g.search_select_next();
+                                }
+                            }
+                            KeyCode::Char(c) => {
+                                if g.search_query.len() < 100 {
+                                    g.search_query.push(c);
+                                }
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
+                    // Handle search results navigation
+                    if g.search_results_visible {
+                        match key.code {
+                            KeyCode::Esc => {
+                                g.search_results_visible = false;
+                                g.search_results.clear();
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                g.search_select_prev();
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                g.search_select_next();
+                            }
+                            KeyCode::Char('/') => {
+                                g.start_search();
+                            }
+                            _ => {}
+                        }
+                        continue;
+                    }
+
+                    // Normal mode keybindings
                     match key.code {
-                        KeyCode::Char('q') | KeyCode::Esc => break,
+                        KeyCode::Char('q') => break,
+                        KeyCode::Esc => {
+                            if g.selected_event.is_some() {
+                                g.clear_event_selection();
+                            } else {
+                                break;
+                            }
+                        }
+                        KeyCode::Char('/') => {
+                            g.start_search();
+                        }
                         KeyCode::Char('c') => g.events.clear(),
                         KeyCode::Char('d') => g.set_view(ViewMode::Dashboard),
                         KeyCode::Char('a') => g.set_view(ViewMode::ActivityLogs),
                         KeyCode::Char('g') => g.set_view(ViewMode::GraphList),
                         KeyCode::Char('m') => g.set_view(ViewMode::GraphMap),
+                        KeyCode::Char('+') | KeyCode::Char('=') => {
+                            g.zoom_in();
+                        }
+                        KeyCode::Char('-') => {
+                            g.zoom_out();
+                        }
                         KeyCode::Tab => g.cycle_view(),
                         KeyCode::Up | KeyCode::Char('k') => match g.view_mode {
                             ViewMode::Dashboard | ViewMode::ActivityLogs => g.select_event_prev(),
@@ -354,8 +458,20 @@ async fn run_tui(state: Arc<Mutex<AppState>>) -> Result<()> {
                 Event::Mouse(m) => {
                     let mut g = state.lock().await;
                     match m.kind {
-                        MouseEventKind::ScrollUp => g.scroll_up(),
-                        MouseEventKind::ScrollDown => g.scroll_down(),
+                        MouseEventKind::ScrollUp => {
+                            if m.modifiers.contains(KeyModifiers::CONTROL) {
+                                g.zoom_in();
+                            } else {
+                                g.scroll_up();
+                            }
+                        }
+                        MouseEventKind::ScrollDown => {
+                            if m.modifiers.contains(KeyModifiers::CONTROL) {
+                                g.zoom_out();
+                            } else {
+                                g.scroll_down();
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -376,6 +492,185 @@ async fn run_tui(state: Arc<Mutex<AppState>>) -> Result<()> {
     )?;
     terminal.show_cursor()?;
     Ok(())
+}
+
+async fn execute_search(
+    base_url: &str,
+    api_key: &str,
+    user_id: &str,
+    query: &str,
+    mode: SearchMode,
+) -> Result<Vec<types::SearchResult>, String> {
+    let client = reqwest::Client::new();
+
+    let url = match mode {
+        SearchMode::Keyword => format!("{}/api/list/{}?query={}", base_url, user_id, query),
+        SearchMode::Semantic => format!("{}/api/recall", base_url),
+        SearchMode::Date => format!("{}/api/recall/date", base_url),
+    };
+
+    match mode {
+        SearchMode::Keyword => {
+            // GET request for keyword search
+            let resp = client
+                .get(&url)
+                .header("X-API-Key", api_key)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            parse_memory_list_response(data)
+        }
+        SearchMode::Semantic => {
+            // POST request for semantic search
+            let body = serde_json::json!({
+                "user_id": user_id,
+                "query": query,
+                "mode": "semantic",
+                "limit": 20
+            });
+
+            let resp = client
+                .post(&url)
+                .header("X-API-Key", api_key)
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            parse_recall_response(data)
+        }
+        SearchMode::Date => {
+            // POST request for date range search
+            let body = serde_json::json!({
+                "user_id": user_id,
+                "start": query,
+                "limit": 20
+            });
+
+            let resp = client
+                .post(&url)
+                .header("X-API-Key", api_key)
+                .header("Content-Type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| e.to_string())?;
+
+            let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+            parse_recall_response(data)
+        }
+    }
+}
+
+fn parse_memory_list_response(data: serde_json::Value) -> Result<Vec<types::SearchResult>, String> {
+    let memories = data
+        .get("memories")
+        .and_then(|m| m.as_array())
+        .ok_or("Invalid response format")?;
+
+    let mut results = Vec::new();
+    for mem in memories {
+        let id = mem
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let content = mem
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let memory_type = mem
+            .get("memory_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown")
+            .to_string();
+        let created_at = mem
+            .get("created_at")
+            .and_then(|v| v.as_str())
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .unwrap_or_else(chrono::Utc::now);
+        let tags = mem
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        results.push(types::SearchResult {
+            id,
+            content,
+            memory_type,
+            score: 1.0,
+            created_at,
+            tags,
+        });
+    }
+    Ok(results)
+}
+
+fn parse_recall_response(data: serde_json::Value) -> Result<Vec<types::SearchResult>, String> {
+    let memories = data
+        .get("memories")
+        .and_then(|m| m.as_array())
+        .ok_or("Invalid response format")?;
+
+    let mut results = Vec::new();
+    for mem in memories {
+        let id = mem
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let content = mem
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let memory_type = mem
+            .get("memory_type")
+            .and_then(|v| v.as_str())
+            .unwrap_or("Unknown")
+            .to_string();
+        let score = mem
+            .get("score")
+            .and_then(|v| v.as_f64())
+            .map(|f| f as f32)
+            .unwrap_or(0.0);
+        let created_at = mem
+            .get("created_at")
+            .and_then(|v| v.as_str())
+            .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+            .map(|dt| dt.with_timezone(&chrono::Utc))
+            .unwrap_or_else(chrono::Utc::now);
+        let tags = mem
+            .get("tags")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        results.push(types::SearchResult {
+            id,
+            content,
+            memory_type,
+            score,
+            created_at,
+            tags,
+        });
+    }
+    Ok(results)
 }
 
 fn ui(f: &mut Frame, state: &AppState) {

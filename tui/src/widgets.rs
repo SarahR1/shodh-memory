@@ -1,5 +1,5 @@
 use crate::logo::{ELEPHANT, ELEPHANT_GRADIENT, SHODH_GRADIENT, SHODH_TEXT};
-use crate::types::{AppState, DisplayEvent, ViewMode, VERSION};
+use crate::types::{AppState, DisplayEvent, SearchResult, ViewMode, VERSION};
 use ratatui::{prelude::*, widgets::*};
 
 fn truncate(s: &str, max_len: usize) -> String {
@@ -161,12 +161,298 @@ pub fn render_header(f: &mut Frame, area: Rect, state: &AppState) {
 }
 
 pub fn render_main(f: &mut Frame, area: Rect, state: &AppState) {
+    // If search results are visible, render them instead of normal view
+    if state.search_results_visible {
+        render_search_results(f, area, state);
+        return;
+    }
+
+    // If search is loading, show loading indicator overlay
+    if state.search_loading {
+        render_search_loading(f, area, state);
+        return;
+    }
+
     match state.view_mode {
         ViewMode::Dashboard => render_dashboard(f, area, state),
         ViewMode::ActivityLogs => render_activity_logs(f, area, state),
         ViewMode::GraphList => render_graph_list(f, area, state),
         ViewMode::GraphMap => render_graph_map(f, area, state),
     }
+}
+
+fn render_search_loading(f: &mut Frame, area: Rect, state: &AppState) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Yellow))
+        .title(Span::styled(
+            " SEARCHING... ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    let spinner = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    let idx = (state.animation_tick as usize / 2) % spinner.len();
+    let loading_text = vec![
+        Line::from(""),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled(
+                spinner[idx],
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(" Searching for \"{}\"...", state.search_query),
+                Style::default().fg(Color::White),
+            ),
+        ]),
+    ];
+    f.render_widget(
+        Paragraph::new(loading_text).alignment(Alignment::Center),
+        inner,
+    );
+}
+
+fn render_search_results(f: &mut Frame, area: Rect, state: &AppState) {
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Green))
+        .title(Span::styled(
+            format!(
+                " SEARCH RESULTS: \"{}\" ({}) ",
+                truncate(&state.search_query, 30),
+                state.search_results.len()
+            ),
+            Style::default()
+                .fg(Color::Green)
+                .add_modifier(Modifier::BOLD),
+        ))
+        .title(
+            block::Title::from(Span::styled(
+                format!(" [{}] ", state.search_mode.label()),
+                Style::default().fg(Color::Cyan),
+            ))
+            .alignment(Alignment::Right),
+        );
+    let inner = block.inner(area);
+    f.render_widget(block, area);
+
+    if state.search_results.is_empty() {
+        let no_results = vec![
+            Line::from(""),
+            Line::from(Span::styled(
+                "  No results found.",
+                Style::default().fg(Color::DarkGray),
+            )),
+            Line::from(""),
+            Line::from(Span::styled(
+                "  Press / to search again or Esc to close.",
+                Style::default().fg(Color::DarkGray),
+            )),
+        ];
+        f.render_widget(Paragraph::new(no_results), inner);
+        return;
+    }
+
+    // Calculate lines per result based on zoom level
+    let lines_per_result = match state.zoom_level {
+        0 => 2u16, // compact: 2 lines
+        1 => 4u16, // normal: 4 lines
+        _ => 6u16, // expanded: 6 lines
+    };
+    let max_visible = (inner.height / lines_per_result).max(1) as usize;
+
+    // Calculate scroll to keep selected in view
+    let scroll_start = if state.search_selected >= max_visible {
+        state.search_selected - max_visible + 1
+    } else {
+        0
+    };
+
+    let mut y_offset = 0u16;
+    for (idx, result) in state
+        .search_results
+        .iter()
+        .enumerate()
+        .skip(scroll_start)
+        .take(max_visible)
+    {
+        let result_area = Rect {
+            x: inner.x,
+            y: inner.y + y_offset,
+            width: inner.width,
+            height: lines_per_result,
+        };
+        if result_area.y + result_area.height <= inner.y + inner.height {
+            let is_selected = idx == state.search_selected;
+            render_search_result_item(f, result_area, result, is_selected, state.zoom_level);
+        }
+        y_offset += lines_per_result;
+    }
+
+    // Scrollbar
+    if state.search_results.len() > max_visible {
+        let scrollbar = Scrollbar::default().orientation(ScrollbarOrientation::VerticalRight);
+        let mut scrollbar_state =
+            ScrollbarState::new(state.search_results.len()).position(state.search_selected);
+        f.render_stateful_widget(
+            scrollbar,
+            area.inner(Margin {
+                vertical: 1,
+                horizontal: 0,
+            }),
+            &mut scrollbar_state,
+        );
+    }
+}
+
+fn render_search_result_item(
+    f: &mut Frame,
+    area: Rect,
+    result: &SearchResult,
+    is_selected: bool,
+    zoom_level: u8,
+) {
+    let bg = if is_selected {
+        Color::Rgb(25, 50, 40)
+    } else {
+        Color::Reset
+    };
+    let content_width = area.width.saturating_sub(4) as usize;
+
+    // Background for selected
+    if is_selected {
+        f.render_widget(Block::default().style(Style::default().bg(bg)), area);
+    }
+
+    let mut lines = Vec::new();
+
+    // Line 1: Type + Score + ID + Time
+    let short_id = if result.id.len() > 8 {
+        &result.id[..8]
+    } else {
+        &result.id
+    };
+    let time_ago = {
+        let now = chrono::Utc::now();
+        let elapsed = (now - result.created_at).num_seconds();
+        if elapsed < 60 {
+            format!("{}s", elapsed)
+        } else if elapsed < 3600 {
+            format!("{}m", elapsed / 60)
+        } else if elapsed < 86400 {
+            format!("{}h", elapsed / 3600)
+        } else {
+            result.created_at.format("%m/%d").to_string()
+        }
+    };
+
+    let prefix = if is_selected { "▶ " } else { "  " };
+    lines.push(Line::from(vec![
+        Span::styled(
+            prefix,
+            Style::default()
+                .fg(if is_selected {
+                    Color::Cyan
+                } else {
+                    Color::DarkGray
+                })
+                .add_modifier(Modifier::BOLD)
+                .bg(bg),
+        ),
+        Span::styled(
+            format!("[{}]", result.memory_type),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD)
+                .bg(bg),
+        ),
+        Span::styled(
+            format!(" {:.2} ", result.score),
+            Style::default().fg(Color::Yellow).bg(bg),
+        ),
+        Span::styled(short_id, Style::default().fg(Color::DarkGray).bg(bg)),
+        Span::styled(
+            format!(" {}", time_ago),
+            Style::default().fg(Color::DarkGray).bg(bg),
+        ),
+    ]));
+
+    // Line 2: Content (truncated based on zoom)
+    let content_len = match zoom_level {
+        0 => content_width.saturating_sub(4),
+        1 => content_width * 2,
+        _ => content_width * 4,
+    };
+    let content_preview = truncate(&result.content, content_len);
+
+    if zoom_level == 0 {
+        // Compact: single line content
+        lines.push(Line::from(vec![
+            Span::styled("  ", Style::default().bg(bg)),
+            Span::styled(
+                content_preview,
+                Style::default()
+                    .fg(if is_selected {
+                        Color::White
+                    } else {
+                        Color::Gray
+                    })
+                    .bg(bg),
+            ),
+        ]));
+    } else {
+        // Normal/Expanded: word-wrap content
+        let mut remaining = content_preview.as_str();
+        let line_width = content_width.saturating_sub(2);
+        let max_lines = if zoom_level == 1 { 2 } else { 4 };
+        let mut line_count = 0;
+        while !remaining.is_empty() && line_count < max_lines {
+            let take = remaining.chars().take(line_width).collect::<String>();
+            let actual_len = take.len();
+            lines.push(Line::from(vec![
+                Span::styled("  ", Style::default().bg(bg)),
+                Span::styled(
+                    take,
+                    Style::default()
+                        .fg(if is_selected {
+                            Color::White
+                        } else {
+                            Color::Gray
+                        })
+                        .bg(bg),
+                ),
+            ]));
+            remaining = &remaining[actual_len.min(remaining.len())..];
+            line_count += 1;
+        }
+    }
+
+    // Line 3 (normal+): Tags
+    if zoom_level >= 1 && !result.tags.is_empty() {
+        let tags_str = result
+            .tags
+            .iter()
+            .take(5)
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
+        lines.push(Line::from(vec![
+            Span::styled("  ", Style::default().bg(bg)),
+            Span::styled("tags: ", Style::default().fg(Color::DarkGray).bg(bg)),
+            Span::styled(
+                truncate(&tags_str, content_width.saturating_sub(8)),
+                Style::default().fg(Color::Green).bg(bg),
+            ),
+        ]));
+    }
+
+    f.render_widget(Paragraph::new(lines), area);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1445,55 +1731,161 @@ pub fn render_footer(f: &mut Frame, area: Rect, state: &AppState) {
         return;
     }
 
+    // Search input mode
+    if state.search_active {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Yellow))
+            .title(Span::styled(
+                " SEARCH ",
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        let cursor_char = if state.animation_tick % 10 < 5 {
+            "█"
+        } else {
+            " "
+        };
+        let search_line = Line::from(vec![
+            Span::styled(
+                format!(" [{}] ", state.search_mode.label()),
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(&state.search_query, Style::default().fg(Color::White)),
+            Span::styled(cursor_char, Style::default().fg(Color::Yellow)),
+            Span::raw("  "),
+            Span::styled("Tab", Style::default().fg(Color::DarkGray)),
+            Span::styled("=mode ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Enter", Style::default().fg(Color::DarkGray)),
+            Span::styled("=search ", Style::default().fg(Color::DarkGray)),
+            Span::styled("Esc", Style::default().fg(Color::DarkGray)),
+            Span::styled("=cancel", Style::default().fg(Color::DarkGray)),
+        ]);
+        f.render_widget(Paragraph::new(search_line).block(block), area);
+        return;
+    }
+
+    // Search results visible - show navigation hints
+    if state.search_results_visible {
+        let block = Block::default()
+            .borders(Borders::ALL)
+            .border_style(Style::default().fg(Color::Green))
+            .title(Span::styled(
+                format!(" {} RESULTS ", state.search_results.len()),
+                Style::default()
+                    .fg(Color::Green)
+                    .add_modifier(Modifier::BOLD),
+            ));
+        let result_line = Line::from(vec![
+            Span::styled(
+                " j/k ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("navigate ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                " / ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("new search ", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                " Esc ",
+                Style::default()
+                    .fg(Color::Cyan)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("close ", Style::default().fg(Color::DarkGray)),
+            Span::raw("  "),
+            Span::styled(
+                format!(
+                    "[{}/{}]",
+                    state.search_selected + 1,
+                    state.search_results.len()
+                ),
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]);
+        f.render_widget(Paragraph::new(result_line).block(block), area);
+        return;
+    }
+
+    // Normal footer
     let keys = vec![
         Span::styled(
-            " q ",
+            " / ",
+            Style::default()
+                .fg(Color::Yellow)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("search ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            "q ",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("quit ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            " d ",
+            "d ",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("dashboard ", Style::default().fg(Color::DarkGray)),
+        Span::styled("dash ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            " a ",
+            "a ",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("activity ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            " g ",
+            "g ",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("graph ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            " m ",
+            "m ",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
         Span::styled("map ", Style::default().fg(Color::DarkGray)),
         Span::styled(
-            " j/k ",
+            "j/k ",
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
         ),
-        Span::styled("scroll ", Style::default().fg(Color::DarkGray)),
-        Span::raw("  "),
+        Span::styled("↑↓ ", Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            "+/- ",
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled("zoom ", Style::default().fg(Color::DarkGray)),
+        Span::raw(" "),
         Span::styled(
             format!("[{}]", view_name),
             Style::default()
                 .fg(Color::Magenta)
                 .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw(" "),
+        Span::styled(
+            format!("[{}]", state.zoom_label()),
+            Style::default().fg(Color::DarkGray),
         ),
     ];
     let block = Block::default()

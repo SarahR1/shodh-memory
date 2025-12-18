@@ -805,10 +805,43 @@ impl MultiUserMemoryManager {
             }
         };
 
+        // Filter out garbage/noise entities from neural NER
+        // - Minimum 3 characters (filters "dh", "TU", "at", etc.)
+        // - Must have at least one uppercase letter (proper nouns)
+        // - Filter common stop words that NER sometimes misclassifies
+        let stop_words: std::collections::HashSet<&str> = [
+            "the", "and", "for", "that", "this", "with", "from", "have", "been",
+            "are", "was", "were", "will", "would", "could", "should", "may", "might",
+        ].iter().cloned().collect();
+        
+        let filtered_entities: Vec<_> = extracted_entities
+            .into_iter()
+            .filter(|e| {
+                let name = e.text.trim();
+                // Minimum 3 chars
+                if name.len() < 3 {
+                    return false;
+                }
+                // Must have at least one uppercase letter
+                if !name.chars().any(|c| c.is_uppercase()) {
+                    return false;
+                }
+                // Not a stop word
+                if stop_words.contains(name.to_lowercase().as_str()) {
+                    return false;
+                }
+                // High confidence threshold for short names
+                if name.len() < 5 && e.confidence < 0.8 {
+                    return false;
+                }
+                true
+            })
+            .collect();
+
         let mut entity_uuids = Vec::new();
 
         // Add entities to the graph - map NerEntityType to EntityLabel
-        for ner_entity in extracted_entities {
+        for ner_entity in filtered_entities {
             let label = match ner_entity.entity_type {
                 NerEntityType::Person => EntityLabel::Person,
                 NerEntityType::Organization => EntityLabel::Organization,
@@ -4621,6 +4654,18 @@ async fn invalidate_relationship(
         .invalidate_relationship(&rel_uuid)
         .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
 
+    // Broadcast EDGE_INVALIDATE event for real-time dashboard
+    state.emit_event(MemoryEvent {
+        event_type: "EDGE_INVALIDATE".to_string(),
+        timestamp: chrono::Utc::now(),
+        user_id: req.user_id.clone(),
+        memory_id: Some(req.relationship_uuid.clone()),
+        content_preview: Some("Relationship invalidated".to_string()),
+        memory_type: Some("graph".to_string()),
+        importance: None,
+        count: None,
+    });
+
     Ok(Json(serde_json::json!({
         "success": true,
         "message": "Relationship invalidated"
@@ -5900,6 +5945,18 @@ async fn add_entity(
         .add_entity(entity)
         .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
 
+    // Broadcast ENTITY_ADD event for real-time dashboard
+    state.emit_event(MemoryEvent {
+        event_type: "ENTITY_ADD".to_string(),
+        timestamp: chrono::Utc::now(),
+        user_id: req.user_id.clone(),
+        memory_id: Some(entity_uuid.to_string()),
+        content_preview: Some(format!("Entity: {} ({})", req.name, req.label)),
+        memory_type: Some("graph".to_string()),
+        importance: None,
+        count: None,
+    });
+
     Ok(Json(serde_json::json!({
         "success": true,
         "entity_uuid": entity_uuid.to_string(),
@@ -5996,6 +6053,18 @@ async fn add_relationship(
         .add_relationship(edge)
         .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
 
+    // Broadcast EDGE_ADD event for real-time dashboard
+    state.emit_event(MemoryEvent {
+        event_type: "EDGE_ADD".to_string(),
+        timestamp: chrono::Utc::now(),
+        user_id: req.user_id.clone(),
+        memory_id: Some(edge_uuid.to_string()),
+        content_preview: Some(format!("{} -> {} ({})", req.from_entity_name, req.to_entity_name, req.relation_type)),
+        memory_type: Some("graph".to_string()),
+        importance: None,
+        count: None,
+    });
+
     Ok(Json(serde_json::json!({
         "success": true,
         "relationship_uuid": edge_uuid.to_string(),
@@ -6056,6 +6125,123 @@ async fn get_memory_universe(
         .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
 
     Ok(Json(universe))
+}
+
+/// Clear all graph data for a user (entities, relationships, episodes)
+/// This removes all garbage/stale entities from the knowledge graph.
+async fn clear_user_graph(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    validation::validate_user_id(&user_id).map_validation_err("user_id")?;
+
+    let graph = state.get_user_graph(&user_id).map_err(AppError::Internal)?;
+    let graph_guard = graph.write();
+
+    let (entities, relationships, episodes) = graph_guard
+        .clear_all()
+        .map_err(|e| AppError::Internal(anyhow::anyhow!(e)))?;
+
+    info!(
+        "Cleared graph for user {}: {} entities, {} relationships, {} episodes",
+        user_id, entities, relationships, episodes
+    );
+
+    // Broadcast GRAPH_CLEAR event for real-time dashboard
+    state.emit_event(MemoryEvent {
+        event_type: "GRAPH_CLEAR".to_string(),
+        timestamp: chrono::Utc::now(),
+        user_id: user_id.clone(),
+        memory_id: None,
+        content_preview: Some(format!(
+            "Cleared {} entities, {} relationships, {} episodes",
+            entities, relationships, episodes
+        )),
+        memory_type: Some("graph".to_string()),
+        importance: None,
+        count: Some(entities + relationships + episodes),
+    });
+
+    Ok(Json(serde_json::json!({
+        "cleared": {
+            "entities": entities,
+            "relationships": relationships,
+            "episodes": episodes
+        }
+    })))
+}
+
+/// Rebuild graph from all existing memories using improved NER
+/// This re-processes all memories to extract clean entities and relationships.
+async fn rebuild_user_graph(
+    State(state): State<AppState>,
+    Path(user_id): Path<String>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    validation::validate_user_id(&user_id).map_validation_err("user_id")?;
+
+    // First, clear existing graph data
+    let graph = state.get_user_graph(&user_id).map_err(AppError::Internal)?;
+    {
+        let graph_guard = graph.write();
+        let _ = graph_guard.clear_all();
+    }
+
+    // Get all memories for this user
+    let memory_sys = state.get_user_memory(&user_id).map_err(AppError::Internal)?;
+    let memories: Vec<(MemoryId, Experience)> = {
+        let memory_guard = memory_sys.read();
+        memory_guard
+            .get_all_memories()
+            .map_err(AppError::Internal)?
+            .into_iter()
+            .map(|m| (m.id.clone(), m.experience.clone()))
+            .collect()
+    };
+
+    let total_memories = memories.len();
+    let mut processed = 0;
+
+    // Re-process each memory through entity extraction
+    for (memory_id, experience) in memories {
+        if let Err(e) = state.process_experience_into_graph(&user_id, &experience, &memory_id) {
+            tracing::debug!("Failed to process memory {}: {}", memory_id.0, e);
+        } else {
+            processed += 1;
+        }
+    }
+
+    // Get final stats
+    let stats = state.get_user_graph_stats(&user_id).map_err(AppError::Internal)?;
+    let entities_created = stats.entity_count;
+    let relationships_created = stats.relationship_count;
+
+    info!(
+        "Rebuilt graph for user {}: processed {}/{} memories, created {} entities, {} relationships",
+        user_id, processed, total_memories, entities_created, relationships_created
+    );
+
+    // Broadcast GRAPH_REBUILD event for real-time dashboard
+    state.emit_event(MemoryEvent {
+        event_type: "GRAPH_REBUILD".to_string(),
+        timestamp: chrono::Utc::now(),
+        user_id: user_id.clone(),
+        memory_id: None,
+        content_preview: Some(format!(
+            "Rebuilt: {} memories -> {} entities, {} relationships",
+            processed, entities_created, relationships_created
+        )),
+        memory_type: Some("graph".to_string()),
+        importance: None,
+        count: Some(entities_created + relationships_created),
+    });
+
+    Ok(Json(serde_json::json!({
+        "success": true,
+        "processed_memories": processed,
+        "total_memories": total_memories,
+        "entities_created": entities_created,
+        "relationships_created": relationships_created
+    })))
 }
 
 // ====== Brain State Visualization API ======
@@ -6460,6 +6646,10 @@ async fn main() -> Result<()> {
         .route("/api/graph/episode/get", post(get_episode))
         // Memory Universe Visualization (3D graph with salience-based sizing)
         .route("/api/graph/{user_id}/universe", get(get_memory_universe))
+        // Clear graph data (for removing garbage entities)
+        .route("/api/graph/{user_id}/clear", delete(clear_user_graph))
+        // Rebuild graph from existing memories with improved NER
+        .route("/api/graph/{user_id}/rebuild", post(rebuild_user_graph))
         // Memory Visualization
         .route(
             "/api/visualization/{user_id}/stats",

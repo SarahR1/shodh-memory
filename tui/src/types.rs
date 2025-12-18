@@ -15,6 +15,42 @@ pub enum ViewMode {
     GraphMap,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum SearchMode {
+    #[default]
+    Keyword,
+    Semantic,
+    Date,
+}
+
+impl SearchMode {
+    pub fn label(&self) -> &'static str {
+        match self {
+            SearchMode::Keyword => "keyword",
+            SearchMode::Semantic => "semantic",
+            SearchMode::Date => "date",
+        }
+    }
+
+    pub fn cycle(&self) -> SearchMode {
+        match self {
+            SearchMode::Keyword => SearchMode::Semantic,
+            SearchMode::Semantic => SearchMode::Date,
+            SearchMode::Date => SearchMode::Keyword,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SearchResult {
+    pub id: String,
+    pub content: String,
+    pub memory_type: String,
+    pub score: f32,
+    pub created_at: DateTime<Utc>,
+    pub tags: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TierStats {
     pub working: u32,
@@ -420,6 +456,22 @@ pub struct AppState {
     pub error_message: Option<(String, Instant)>,
     /// Graph rotation angle in radians (for 3D view)
     pub graph_rotation: f32,
+    /// Search mode active flag
+    pub search_active: bool,
+    /// Search query input
+    pub search_query: String,
+    /// Current search mode (keyword/semantic/date)
+    pub search_mode: SearchMode,
+    /// Search results
+    pub search_results: Vec<SearchResult>,
+    /// Selected search result index
+    pub search_selected: usize,
+    /// Whether search results are being displayed
+    pub search_results_visible: bool,
+    /// Search loading state
+    pub search_loading: bool,
+    /// UI zoom level (affects content density: 0=compact, 1=normal, 2=expanded)
+    pub zoom_level: u8,
 }
 
 impl AppState {
@@ -448,7 +500,81 @@ impl AppState {
             selected_event: None,
             error_message: None,
             graph_rotation: 0.0,
+            search_active: false,
+            search_query: String::new(),
+            search_mode: SearchMode::default(),
+            search_results: Vec::new(),
+            search_selected: 0,
+            search_results_visible: false,
+            search_loading: false,
+            zoom_level: 1,
         }
+    }
+
+    pub fn zoom_in(&mut self) {
+        if self.zoom_level < 2 {
+            self.zoom_level += 1;
+        }
+    }
+
+    pub fn zoom_out(&mut self) {
+        if self.zoom_level > 0 {
+            self.zoom_level -= 1;
+        }
+    }
+
+    pub fn zoom_label(&self) -> &'static str {
+        match self.zoom_level {
+            0 => "compact",
+            1 => "normal",
+            _ => "expanded",
+        }
+    }
+
+    pub fn start_search(&mut self) {
+        self.search_active = true;
+        self.search_query.clear();
+        self.search_results.clear();
+        self.search_results_visible = false;
+        self.search_loading = false;
+    }
+
+    pub fn cancel_search(&mut self) {
+        self.search_active = false;
+        self.search_query.clear();
+        self.search_results.clear();
+        self.search_results_visible = false;
+        self.search_loading = false;
+    }
+
+    pub fn cycle_search_mode(&mut self) {
+        self.search_mode = self.search_mode.cycle();
+    }
+
+    pub fn set_search_results(&mut self, results: Vec<SearchResult>) {
+        self.search_results = results;
+        self.search_selected = 0;
+        self.search_results_visible = true;
+        self.search_loading = false;
+    }
+
+    pub fn search_select_next(&mut self) {
+        if !self.search_results.is_empty() {
+            self.search_selected = (self.search_selected + 1) % self.search_results.len();
+        }
+    }
+
+    pub fn search_select_prev(&mut self) {
+        if !self.search_results.is_empty() {
+            self.search_selected = self
+                .search_selected
+                .checked_sub(1)
+                .unwrap_or(self.search_results.len() - 1);
+        }
+    }
+
+    pub fn selected_search_result(&self) -> Option<&SearchResult> {
+        self.search_results.get(self.search_selected)
     }
 
     pub fn rotate_graph_left(&mut self) {
