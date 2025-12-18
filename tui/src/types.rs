@@ -6,6 +6,391 @@ use std::time::Instant;
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+// ═══════════════════════════════════════════════════════════════════════════
+// ANIMATION SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Easing functions for smooth animations
+#[derive(Debug, Clone, Copy, Default)]
+pub enum Easing {
+    #[default]
+    Linear,
+    EaseOut,
+    EaseIn,
+    EaseInOut,
+    Bounce,
+    Elastic,
+}
+
+impl Easing {
+    pub fn apply(&self, t: f32) -> f32 {
+        let t = t.clamp(0.0, 1.0);
+        match self {
+            Easing::Linear => t,
+            Easing::EaseOut => 1.0 - (1.0 - t).powi(3),
+            Easing::EaseIn => t.powi(3),
+            Easing::EaseInOut => {
+                if t < 0.5 {
+                    4.0 * t.powi(3)
+                } else {
+                    1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+                }
+            }
+            Easing::Bounce => {
+                let n1 = 7.5625;
+                let d1 = 2.75;
+                if t < 1.0 / d1 {
+                    n1 * t * t
+                } else if t < 2.0 / d1 {
+                    let t = t - 1.5 / d1;
+                    n1 * t * t + 0.75
+                } else if t < 2.5 / d1 {
+                    let t = t - 2.25 / d1;
+                    n1 * t * t + 0.9375
+                } else {
+                    let t = t - 2.625 / d1;
+                    n1 * t * t + 0.984375
+                }
+            }
+            Easing::Elastic => {
+                if t == 0.0 || t == 1.0 {
+                    t
+                } else {
+                    let c4 = (2.0 * std::f32::consts::PI) / 3.0;
+                    2.0_f32.powf(-10.0 * t) * ((t * 10.0 - 0.75) * c4).sin() + 1.0
+                }
+            }
+        }
+    }
+}
+
+/// Animation type defines how an element animates
+#[derive(Debug, Clone)]
+pub enum AnimationType {
+    /// Fade from transparent to opaque
+    FadeIn { duration_ms: u64 },
+    /// Fade from opaque to transparent
+    FadeOut { duration_ms: u64 },
+    /// Slide in from a direction with fade
+    SlideIn { direction: SlideDirection, distance: f32, duration_ms: u64 },
+    /// Slide out to a direction with fade
+    SlideOut { direction: SlideDirection, distance: f32, duration_ms: u64 },
+    /// Scale from small to full size
+    ScaleIn { from: f32, duration_ms: u64 },
+    /// Pulsing glow effect (continuous)
+    Pulse { min_intensity: f32, max_intensity: f32, period_ms: u64 },
+    /// Attention-grabbing highlight flash
+    Flash { color: Color, duration_ms: u64 },
+    /// Color transition
+    ColorTransition { from: Color, to: Color, duration_ms: u64 },
+    /// Combined slide + fade + scale for new items
+    Entrance { delay_ms: u64, duration_ms: u64 },
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub enum SlideDirection {
+    #[default]
+    Left,
+    Right,
+    Top,
+    Bottom,
+}
+
+/// Animation instance tracking progress
+#[derive(Debug, Clone)]
+pub struct Animation {
+    pub animation_type: AnimationType,
+    pub easing: Easing,
+    pub started_at: Instant,
+    pub delay_elapsed: bool,
+}
+
+impl Animation {
+    pub fn new(animation_type: AnimationType, easing: Easing) -> Self {
+        Self {
+            animation_type,
+            easing,
+            started_at: Instant::now(),
+            delay_elapsed: false,
+        }
+    }
+
+    pub fn entrance(index: usize) -> Self {
+        Self::new(
+            AnimationType::Entrance {
+                delay_ms: (index as u64) * 50, // Stagger by 50ms per item
+                duration_ms: 300,
+            },
+            Easing::EaseOut,
+        )
+    }
+
+    pub fn slide_in_right() -> Self {
+        Self::new(
+            AnimationType::SlideIn {
+                direction: SlideDirection::Right,
+                distance: 20.0,
+                duration_ms: 250,
+            },
+            Easing::EaseOut,
+        )
+    }
+
+    pub fn fade_in() -> Self {
+        Self::new(
+            AnimationType::FadeIn { duration_ms: 200 },
+            Easing::EaseOut,
+        )
+    }
+
+    pub fn pulse() -> Self {
+        Self::new(
+            AnimationType::Pulse {
+                min_intensity: 0.6,
+                max_intensity: 1.0,
+                period_ms: 1000,
+            },
+            Easing::EaseInOut,
+        )
+    }
+
+    /// Get animation progress (0.0 to 1.0)
+    pub fn progress(&self) -> f32 {
+        let elapsed = self.started_at.elapsed().as_millis() as u64;
+
+        let (delay_ms, duration_ms) = match &self.animation_type {
+            AnimationType::FadeIn { duration_ms } => (0, *duration_ms),
+            AnimationType::FadeOut { duration_ms } => (0, *duration_ms),
+            AnimationType::SlideIn { duration_ms, .. } => (0, *duration_ms),
+            AnimationType::SlideOut { duration_ms, .. } => (0, *duration_ms),
+            AnimationType::ScaleIn { duration_ms, .. } => (0, *duration_ms),
+            AnimationType::Flash { duration_ms, .. } => (0, *duration_ms),
+            AnimationType::ColorTransition { duration_ms, .. } => (0, *duration_ms),
+            AnimationType::Entrance { delay_ms, duration_ms } => (*delay_ms, *duration_ms),
+            AnimationType::Pulse { period_ms, .. } => (0, *period_ms),
+        };
+
+        if elapsed < delay_ms {
+            return 0.0;
+        }
+
+        let active_elapsed = elapsed - delay_ms;
+
+        // Pulse animation loops
+        if matches!(self.animation_type, AnimationType::Pulse { .. }) {
+            let cycle_progress = (active_elapsed % duration_ms) as f32 / duration_ms as f32;
+            // Sine wave for smooth pulse
+            return (cycle_progress * std::f32::consts::PI * 2.0).sin() * 0.5 + 0.5;
+        }
+
+        (active_elapsed as f32 / duration_ms as f32).clamp(0.0, 1.0)
+    }
+
+    /// Check if animation is complete
+    pub fn is_complete(&self) -> bool {
+        if matches!(self.animation_type, AnimationType::Pulse { .. }) {
+            return false; // Pulse never completes
+        }
+        self.progress() >= 1.0
+    }
+
+    /// Get current opacity (0.0 to 1.0)
+    pub fn opacity(&self) -> f32 {
+        let p = self.easing.apply(self.progress());
+        match &self.animation_type {
+            AnimationType::FadeIn { .. } => p,
+            AnimationType::FadeOut { .. } => 1.0 - p,
+            AnimationType::SlideIn { .. } => p,
+            AnimationType::SlideOut { .. } => 1.0 - p,
+            AnimationType::ScaleIn { .. } => p,
+            AnimationType::Entrance { .. } => p,
+            AnimationType::Pulse { min_intensity, max_intensity, .. } => {
+                min_intensity + (max_intensity - min_intensity) * p
+            }
+            _ => 1.0,
+        }
+    }
+
+    /// Get X offset for slide animations
+    pub fn offset_x(&self) -> i16 {
+        let p = self.easing.apply(self.progress());
+        match &self.animation_type {
+            AnimationType::SlideIn { direction, distance, .. } => {
+                let remaining = 1.0 - p;
+                match direction {
+                    SlideDirection::Left => -(distance * remaining) as i16,
+                    SlideDirection::Right => (distance * remaining) as i16,
+                    _ => 0,
+                }
+            }
+            AnimationType::SlideOut { direction, distance, .. } => {
+                match direction {
+                    SlideDirection::Left => -(distance * p) as i16,
+                    SlideDirection::Right => (distance * p) as i16,
+                    _ => 0,
+                }
+            }
+            AnimationType::Entrance { .. } => {
+                let remaining = 1.0 - p;
+                (15.0 * remaining) as i16 // Slide from right
+            }
+            _ => 0,
+        }
+    }
+
+    /// Get Y offset for slide animations
+    pub fn offset_y(&self) -> i16 {
+        let p = self.easing.apply(self.progress());
+        match &self.animation_type {
+            AnimationType::SlideIn { direction, distance, .. } => {
+                let remaining = 1.0 - p;
+                match direction {
+                    SlideDirection::Top => -(distance * remaining) as i16,
+                    SlideDirection::Bottom => (distance * remaining) as i16,
+                    _ => 0,
+                }
+            }
+            AnimationType::SlideOut { direction, distance, .. } => {
+                match direction {
+                    SlideDirection::Top => -(distance * p) as i16,
+                    SlideDirection::Bottom => (distance * p) as i16,
+                    _ => 0,
+                }
+            }
+            AnimationType::Entrance { .. } => {
+                let remaining = 1.0 - p;
+                (3.0 * remaining) as i16 // Slight vertical offset
+            }
+            _ => 0,
+        }
+    }
+
+    /// Get scale factor for scale animations
+    pub fn scale(&self) -> f32 {
+        let p = self.easing.apply(self.progress());
+        match &self.animation_type {
+            AnimationType::ScaleIn { from, .. } => from + (1.0 - from) * p,
+            AnimationType::Entrance { .. } => 0.95 + 0.05 * p,
+            _ => 1.0,
+        }
+    }
+
+    /// Get glow/highlight intensity
+    pub fn glow_intensity(&self) -> f32 {
+        match &self.animation_type {
+            AnimationType::Flash { .. } => {
+                let p = self.progress();
+                if p < 0.5 {
+                    p * 2.0
+                } else {
+                    (1.0 - p) * 2.0
+                }
+            }
+            AnimationType::Pulse { min_intensity, max_intensity, .. } => {
+                let p = self.progress();
+                min_intensity + (max_intensity - min_intensity) * p
+            }
+            _ => 0.0,
+        }
+    }
+}
+
+/// View transition state for smooth view changes
+#[derive(Debug, Clone)]
+pub struct ViewTransition {
+    pub from_view: ViewMode,
+    pub to_view: ViewMode,
+    pub started_at: Instant,
+    pub duration_ms: u64,
+}
+
+impl ViewTransition {
+    pub fn new(from: ViewMode, to: ViewMode) -> Self {
+        Self {
+            from_view: from,
+            to_view: to,
+            started_at: Instant::now(),
+            duration_ms: 200,
+        }
+    }
+
+    pub fn progress(&self) -> f32 {
+        let elapsed = self.started_at.elapsed().as_millis() as f32;
+        (elapsed / self.duration_ms as f32).clamp(0.0, 1.0)
+    }
+
+    pub fn is_complete(&self) -> bool {
+        self.progress() >= 1.0
+    }
+
+    /// Get fade-out progress for old view
+    pub fn fade_out(&self) -> f32 {
+        let p = self.progress();
+        if p < 0.5 {
+            1.0 - (p * 2.0)
+        } else {
+            0.0
+        }
+    }
+
+    /// Get fade-in progress for new view
+    pub fn fade_in(&self) -> f32 {
+        let p = self.progress();
+        if p > 0.5 {
+            (p - 0.5) * 2.0
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Smooth scroll state for animated scrolling
+#[derive(Debug, Clone)]
+pub struct SmoothScroll {
+    pub current: f32,
+    pub target: f32,
+    pub velocity: f32,
+}
+
+impl Default for SmoothScroll {
+    fn default() -> Self {
+        Self {
+            current: 0.0,
+            target: 0.0,
+            velocity: 0.0,
+        }
+    }
+}
+
+impl SmoothScroll {
+    pub fn set_target(&mut self, target: usize) {
+        self.target = target as f32;
+    }
+
+    pub fn update(&mut self, dt: f32) {
+        let diff = self.target - self.current;
+        let spring_force = diff * 15.0; // Spring constant
+        let damping = self.velocity * 8.0; // Damping factor
+        let acceleration = spring_force - damping;
+        self.velocity += acceleration * dt;
+        self.current += self.velocity * dt;
+
+        // Snap to target when close enough
+        if diff.abs() < 0.01 && self.velocity.abs() < 0.01 {
+            self.current = self.target;
+            self.velocity = 0.0;
+        }
+    }
+
+    pub fn current_offset(&self) -> usize {
+        self.current.round().max(0.0) as usize
+    }
+
+    pub fn fractional_offset(&self) -> f32 {
+        self.current - self.current.floor()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum ViewMode {
     #[default]
@@ -116,25 +501,59 @@ pub struct GraphNode {
 }
 
 impl GraphNode {
-    /// Project 3D coordinates to 2D using isometric projection with rotation
+    /// Project 3D coordinates to 2D using perspective projection with rotation and tilt
+    /// Returns (screen_x, screen_y, depth) where depth is used for z-sorting and brightness
     pub fn project_2d(&self, rotation: f32) -> (f32, f32, f32) {
+        self.project_3d(rotation, 0.3) // Default tilt
+    }
+
+    /// Full 3D projection with rotation around Y-axis and tilt around X-axis
+    pub fn project_3d(&self, rotation: f32, tilt: f32) -> (f32, f32, f32) {
+        // Center coordinates around origin (-0.5 to 0.5)
+        let cx = self.x - 0.5;
+        let cy = self.y - 0.5;
+        let cz = self.z - 0.5;
+
+        // Rotate around Y axis (horizontal rotation)
         let cos_r = rotation.cos();
         let sin_r = rotation.sin();
+        let rx = cx * cos_r - cz * sin_r;
+        let rz = cx * sin_r + cz * cos_r;
+        let ry = cy;
 
-        // Rotate around Y axis
-        let rx = self.x * cos_r - self.z * sin_r;
-        let rz = self.x * sin_r + self.z * cos_r;
+        // Tilt around X axis (vertical tilt)
+        let cos_t = tilt.cos();
+        let sin_t = tilt.sin();
+        let ty = ry * cos_t - rz * sin_t;
+        let tz = ry * sin_t + rz * cos_t;
+        let tx = rx;
 
-        // Isometric projection
-        let screen_x = rx * 0.866 + 0.5; // cos(30°) ≈ 0.866
-        let screen_y = self.y * 0.5 + rz * 0.5 + 0.5;
-        let depth = rz; // for depth sorting and brightness
+        // Perspective projection (camera at z = -2)
+        let camera_dist = 2.0;
+        let perspective = camera_dist / (camera_dist + tz + 1.0);
+
+        let screen_x = tx * perspective + 0.5;
+        let screen_y = ty * perspective + 0.5;
+        let depth = tz; // Positive = further away
 
         (
-            screen_x.clamp(0.05, 0.95),
-            screen_y.clamp(0.05, 0.95),
+            screen_x.clamp(0.02, 0.98),
+            screen_y.clamp(0.02, 0.98),
             depth,
         )
+    }
+
+    /// Get node brightness based on depth (closer = brighter)
+    pub fn depth_brightness(&self, depth: f32) -> f32 {
+        // Depth ranges roughly from -1 to 1, map to brightness 0.4 to 1.0
+        let normalized = ((depth + 1.0) / 2.0).clamp(0.0, 1.0);
+        0.4 + (1.0 - normalized) * 0.6
+    }
+
+    /// Get node size based on depth (closer = larger)
+    pub fn depth_size(&self, depth: f32) -> f32 {
+        let normalized = ((depth + 1.0) / 2.0).clamp(0.0, 1.0);
+        0.6 + (1.0 - normalized) * 0.4
     }
 }
 
@@ -322,42 +741,50 @@ impl MemoryEvent {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum AnimationState {
-    SlideIn(f32),
-    Visible,
-    Dissolve(f32),
-    Done,
-}
-
-impl AnimationState {
-    pub fn is_done(&self) -> bool {
-        matches!(self, AnimationState::Done)
-    }
-
-    pub fn opacity(&self) -> f32 {
-        match self {
-            AnimationState::SlideIn(p) => *p,
-            AnimationState::Visible => 1.0,
-            AnimationState::Dissolve(p) => *p,
-            AnimationState::Done => 0.0,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct DisplayEvent {
     pub event: MemoryEvent,
     pub received_at: Instant,
-    pub animation: AnimationState,
+    pub animation: Animation,
+    pub index: usize,
 }
 
 impl DisplayEvent {
-    pub fn new(event: MemoryEvent) -> Self {
+    pub fn new(event: MemoryEvent, index: usize) -> Self {
         Self {
             event,
             received_at: Instant::now(),
-            animation: AnimationState::SlideIn(0.0),
+            animation: Animation::entrance(0), // New events always at index 0
+            index,
+        }
+    }
+
+    pub fn is_animating(&self) -> bool {
+        !self.animation.is_complete()
+    }
+
+    /// Get visual opacity based on animation state
+    pub fn visual_opacity(&self) -> f32 {
+        self.animation.opacity()
+    }
+
+    /// Get horizontal offset for slide animation
+    pub fn offset_x(&self) -> i16 {
+        self.animation.offset_x()
+    }
+
+    /// Check if this is a "new" event (within last 3 seconds)
+    pub fn is_new(&self) -> bool {
+        self.received_at.elapsed().as_secs() < 3
+    }
+
+    /// Get glow intensity for new events
+    pub fn glow(&self) -> f32 {
+        if self.is_new() {
+            let elapsed = self.received_at.elapsed().as_millis() as f32 / 3000.0;
+            1.0 - elapsed.clamp(0.0, 1.0)
+        } else {
+            0.0
         }
     }
 
@@ -456,6 +883,10 @@ pub struct AppState {
     pub error_message: Option<(String, Instant)>,
     /// Graph rotation angle in radians (for 3D view)
     pub graph_rotation: f32,
+    /// Graph tilt angle for 3D perspective
+    pub graph_tilt: f32,
+    /// Auto-rotate graph flag
+    pub graph_auto_rotate: bool,
     /// Search mode active flag
     pub search_active: bool,
     /// Search query input
@@ -478,6 +909,14 @@ pub struct AppState {
     pub search_last_query: String,
     /// Whether viewing detail of selected search result
     pub search_detail_visible: bool,
+    /// Smooth scroll state for animated scrolling
+    pub smooth_scroll: SmoothScroll,
+    /// View transition animation
+    pub view_transition: Option<ViewTransition>,
+    /// Last tick timestamp for delta time calculations
+    pub last_tick: Instant,
+    /// Connection animation (pulse when first connected)
+    pub connection_animation: Option<Animation>,
 }
 
 impl AppState {
@@ -506,6 +945,8 @@ impl AppState {
             selected_event: None,
             error_message: None,
             graph_rotation: 0.0,
+            graph_tilt: 0.3,
+            graph_auto_rotate: false,
             search_active: false,
             search_query: String::new(),
             search_mode: SearchMode::default(),
@@ -517,6 +958,51 @@ impl AppState {
             search_debounce_at: None,
             search_last_query: String::new(),
             search_detail_visible: false,
+            smooth_scroll: SmoothScroll::default(),
+            view_transition: None,
+            last_tick: Instant::now(),
+            connection_animation: None,
+        }
+    }
+
+    /// Set connected status with animation
+    pub fn set_connected(&mut self, connected: bool) {
+        if connected && !self.connected {
+            // Trigger connection animation
+            self.connection_animation = Some(Animation::new(
+                AnimationType::Flash {
+                    color: Color::Green,
+                    duration_ms: 500,
+                },
+                Easing::EaseOut,
+            ));
+        }
+        self.connected = connected;
+    }
+
+    /// Toggle auto-rotate for 3D graph
+    pub fn toggle_graph_auto_rotate(&mut self) {
+        self.graph_auto_rotate = !self.graph_auto_rotate;
+    }
+
+    /// Adjust graph tilt angle
+    pub fn tilt_graph(&mut self, delta: f32) {
+        self.graph_tilt = (self.graph_tilt + delta).clamp(-0.8, 0.8);
+    }
+
+    /// Rotate graph left (counter-clockwise)
+    pub fn rotate_graph_left(&mut self) {
+        self.graph_rotation -= 0.15;
+        if self.graph_rotation < 0.0 {
+            self.graph_rotation += std::f32::consts::PI * 2.0;
+        }
+    }
+
+    /// Rotate graph right (clockwise)
+    pub fn rotate_graph_right(&mut self) {
+        self.graph_rotation += 0.15;
+        if self.graph_rotation > std::f32::consts::PI * 2.0 {
+            self.graph_rotation -= std::f32::consts::PI * 2.0;
         }
     }
 
@@ -619,14 +1105,6 @@ impl AppState {
         self.search_results.get(self.search_selected)
     }
 
-    pub fn rotate_graph_left(&mut self) {
-        self.graph_rotation -= 0.15;
-    }
-
-    pub fn rotate_graph_right(&mut self) {
-        self.graph_rotation += 0.15;
-    }
-
     pub fn select_event_prev(&mut self) {
         if self.events.is_empty() {
             return;
@@ -662,18 +1140,34 @@ impl AppState {
     }
 
     pub fn set_view(&mut self, mode: ViewMode) {
-        self.view_mode = mode;
+        if self.view_mode != mode {
+            self.view_transition = Some(ViewTransition::new(self.view_mode, mode));
+            self.view_mode = mode;
+        }
         self.scroll_offset = 0;
+        self.smooth_scroll.current = 0.0;
+        self.smooth_scroll.target = 0.0;
+        self.smooth_scroll.velocity = 0.0;
     }
 
     pub fn cycle_view(&mut self) {
-        self.view_mode = match self.view_mode {
+        let new_mode = match self.view_mode {
             ViewMode::Dashboard => ViewMode::ActivityLogs,
             ViewMode::ActivityLogs => ViewMode::GraphList,
             ViewMode::GraphList => ViewMode::GraphMap,
             ViewMode::GraphMap => ViewMode::Dashboard,
         };
-        self.scroll_offset = 0;
+        self.set_view(new_mode);
+    }
+
+    /// Check if view is transitioning
+    pub fn is_transitioning(&self) -> bool {
+        self.view_transition.as_ref().map(|t| !t.is_complete()).unwrap_or(false)
+    }
+
+    /// Get view transition progress (for rendering)
+    pub fn transition_progress(&self) -> f32 {
+        self.view_transition.as_ref().map(|t| t.progress()).unwrap_or(1.0)
     }
 
     pub fn session_duration(&self) -> String {
@@ -752,7 +1246,11 @@ impl AppState {
             "CONSOLIDATE" => self.consolidation_stats.cycles += 1,
             _ => {}
         }
-        self.events.push_front(DisplayEvent::new(event));
+        // Update indices for existing events (they're all shifting down)
+        for (i, e) in self.events.iter_mut().enumerate() {
+            e.index = i + 1;
+        }
+        self.events.push_front(DisplayEvent::new(event, 0));
         while self.events.len() > self.max_events {
             self.events.pop_back();
         }
@@ -847,7 +1345,11 @@ impl AppState {
     pub fn scroll_up(&mut self) {
         match self.view_mode {
             ViewMode::GraphList | ViewMode::GraphMap => self.graph_data.select_prev(),
-            _ => self.scroll_offset = self.scroll_offset.saturating_sub(1),
+            _ => {
+                let new_offset = self.scroll_offset.saturating_sub(1);
+                self.scroll_offset = new_offset;
+                self.smooth_scroll.set_target(new_offset);
+            }
         }
     }
 
@@ -858,6 +1360,7 @@ impl AppState {
                 let max = self.events.len().saturating_sub(1);
                 if self.scroll_offset < max {
                     self.scroll_offset += 1;
+                    self.smooth_scroll.set_target(self.scroll_offset);
                 }
             }
         }
@@ -878,15 +1381,47 @@ impl AppState {
     }
 
     pub fn tick(&mut self) {
+        // Calculate delta time
+        let now = Instant::now();
+        let dt = (now - self.last_tick).as_secs_f32().min(0.1); // Cap at 100ms
+        self.last_tick = now;
+
         self.animation_tick = self.animation_tick.wrapping_add(1);
         self.clear_stale_error();
-        for event in &mut self.events {
-            if let AnimationState::SlideIn(ref mut p) = event.animation {
-                *p += 0.15;
-                if *p >= 1.0 {
-                    event.animation = AnimationState::Visible;
-                }
+
+        // Update smooth scroll
+        self.smooth_scroll.update(dt);
+
+        // Clear completed view transitions
+        if let Some(ref transition) = self.view_transition {
+            if transition.is_complete() {
+                self.view_transition = None;
             }
         }
+
+        // Clear completed connection animation
+        if let Some(ref anim) = self.connection_animation {
+            if anim.is_complete() {
+                self.connection_animation = None;
+            }
+        }
+
+        // Auto-rotate graph if enabled
+        if self.graph_auto_rotate {
+            self.graph_rotation += dt * 0.5; // Slow rotation
+            if self.graph_rotation > std::f32::consts::PI * 2.0 {
+                self.graph_rotation -= std::f32::consts::PI * 2.0;
+            }
+        }
+    }
+
+    /// Get effective scroll offset (from smooth scroll)
+    pub fn effective_scroll(&self) -> usize {
+        self.smooth_scroll.current_offset()
+    }
+
+    /// Get fractional scroll offset for sub-pixel rendering hints
+    pub fn scroll_fraction(&self) -> f32 {
+        self.smooth_scroll.fractional_offset()
     }
 }

@@ -2,6 +2,84 @@ use crate::logo::{ELEPHANT, ELEPHANT_GRADIENT, SHODH_GRADIENT, SHODH_TEXT};
 use crate::types::{AppState, DisplayEvent, SearchMode, SearchResult, ViewMode, VERSION};
 use ratatui::{prelude::*, widgets::*};
 
+/// Apply opacity to a color (blend with black)
+fn apply_opacity(color: Color, opacity: f32) -> Color {
+    let opacity = opacity.clamp(0.0, 1.0);
+    match color {
+        Color::Rgb(r, g, b) => Color::Rgb(
+            (r as f32 * opacity) as u8,
+            (g as f32 * opacity) as u8,
+            (b as f32 * opacity) as u8,
+        ),
+        Color::Green => Color::Rgb(0, (128.0 * opacity) as u8, 0),
+        Color::Cyan => Color::Rgb(0, (255.0 * opacity) as u8, (255.0 * opacity) as u8),
+        Color::Yellow => Color::Rgb((255.0 * opacity) as u8, (255.0 * opacity) as u8, 0),
+        Color::Red => Color::Rgb((255.0 * opacity) as u8, 0, 0),
+        Color::Magenta => Color::Rgb((255.0 * opacity) as u8, 0, (255.0 * opacity) as u8),
+        Color::Blue => Color::Rgb(0, 0, (255.0 * opacity) as u8),
+        Color::White => Color::Rgb(
+            (255.0 * opacity) as u8,
+            (255.0 * opacity) as u8,
+            (255.0 * opacity) as u8,
+        ),
+        Color::Gray => Color::Rgb(
+            (128.0 * opacity) as u8,
+            (128.0 * opacity) as u8,
+            (128.0 * opacity) as u8,
+        ),
+        Color::DarkGray => Color::Rgb(
+            (64.0 * opacity) as u8,
+            (64.0 * opacity) as u8,
+            (64.0 * opacity) as u8,
+        ),
+        _ => color,
+    }
+}
+
+/// Interpolate between two colors
+fn lerp_color(from: Color, to: Color, t: f32) -> Color {
+    let t = t.clamp(0.0, 1.0);
+    let (r1, g1, b1) = color_to_rgb(from);
+    let (r2, g2, b2) = color_to_rgb(to);
+    Color::Rgb(
+        (r1 as f32 + (r2 as f32 - r1 as f32) * t) as u8,
+        (g1 as f32 + (g2 as f32 - g1 as f32) * t) as u8,
+        (b1 as f32 + (b2 as f32 - b1 as f32) * t) as u8,
+    )
+}
+
+fn color_to_rgb(color: Color) -> (u8, u8, u8) {
+    match color {
+        Color::Rgb(r, g, b) => (r, g, b),
+        Color::Green => (0, 128, 0),
+        Color::Cyan => (0, 255, 255),
+        Color::Yellow => (255, 255, 0),
+        Color::Red => (255, 0, 0),
+        Color::Magenta => (255, 0, 255),
+        Color::Blue => (0, 0, 255),
+        Color::White => (255, 255, 255),
+        Color::Gray => (128, 128, 128),
+        Color::DarkGray => (64, 64, 64),
+        Color::Black => (0, 0, 0),
+        Color::LightGreen => (144, 238, 144),
+        Color::LightBlue => (173, 216, 230),
+        Color::LightCyan => (224, 255, 255),
+        Color::LightYellow => (255, 255, 224),
+        _ => (128, 128, 128),
+    }
+}
+
+/// Get glow color with intensity
+fn glow_color(base_color: Color, intensity: f32) -> Color {
+    let (r, g, b) = color_to_rgb(base_color);
+    let boost = (intensity * 127.0) as u8;
+    Color::Rgb(
+        r.saturating_add(boost),
+        g.saturating_add(boost),
+        b.saturating_add(boost),
+    )
+}
+
 fn truncate(s: &str, max_len: usize) -> String {
     if s.chars().count() <= max_len {
         s.to_string()
@@ -1236,19 +1314,60 @@ fn render_river_event_selectable(
     let color = event.event.event_color();
     let icon = event.event.event_icon();
     let sep = "-".repeat(area.width.saturating_sub(27) as usize);
-    // Blue-tinted background for better contrast
+
+    // Animation effects
+    let opacity = event.visual_opacity();
+    let glow = event.glow();
+    let is_animating = event.is_animating();
+
+    // Background with animation support
     let bg = if is_selected {
         Color::Rgb(25, 40, 60)
+    } else if glow > 0.3 {
+        // Subtle green glow for new events
+        Color::Rgb(
+            (10.0 + glow * 20.0) as u8,
+            (20.0 + glow * 40.0) as u8,
+            (15.0 + glow * 25.0) as u8,
+        )
     } else {
         Color::Reset
     };
-    // Green circle for newest, arrow for selected
+
+    // Apply opacity to colors for fade-in effect
+    let text_color = if is_animating {
+        apply_opacity(Color::White, opacity)
+    } else if is_selected {
+        Color::White
+    } else {
+        Color::Gray
+    };
+
+    let event_color = if is_animating && !is_newest {
+        apply_opacity(color, opacity)
+    } else if is_newest && glow > 0.0 {
+        glow_color(color, glow * 0.5)
+    } else {
+        color
+    };
+
+    // Prefix: green pulse for newest, arrow for selected
     let (prefix, prefix_color) = if is_newest {
-        ("● ", Color::Green)
+        let pulse_char = if glow > 0.5 { "◉ " } else { "● " };
+        (pulse_char, glow_color(Color::Green, glow * 0.3))
     } else if is_selected {
         ("▶ ", Color::Cyan)
     } else {
-        ("  ", Color::Cyan)
+        ("  ", Color::DarkGray)
+    };
+
+    // Border characters with depth effect for new events
+    let border_color = if is_animating {
+        apply_opacity(Color::DarkGray, opacity)
+    } else if glow > 0.0 {
+        lerp_color(Color::DarkGray, Color::Green, glow * 0.5)
+    } else {
+        Color::DarkGray
     };
 
     let mut lines = vec![Line::from(vec![
@@ -1261,69 +1380,68 @@ fn render_river_event_selectable(
         ),
         Span::styled(
             format!("{:>5} ", event.time_ago()),
-            Style::default().fg(Color::DarkGray).bg(bg),
+            Style::default().fg(border_color).bg(bg),
         ),
-        Span::styled("-+- ", Style::default().fg(Color::DarkGray).bg(bg)),
+        Span::styled("-+- ", Style::default().fg(border_color).bg(bg)),
         Span::styled(
             icon,
             Style::default()
-                .fg(color)
+                .fg(event_color)
                 .add_modifier(Modifier::BOLD)
                 .bg(bg),
         ),
         Span::styled(
             format!(" {} ", event.event.event_type),
             Style::default()
-                .fg(color)
+                .fg(event_color)
                 .add_modifier(Modifier::BOLD)
                 .bg(bg),
         ),
-        Span::styled(sep, Style::default().fg(Color::DarkGray).bg(bg)),
+        Span::styled(sep, Style::default().fg(border_color).bg(bg)),
     ])];
 
     if let Some(preview) = &event.event.content_preview {
         lines.push(Line::from(vec![
             Span::styled("      ", Style::default().bg(bg)),
-            Span::styled("| ", Style::default().fg(Color::DarkGray).bg(bg)),
+            Span::styled("| ", Style::default().fg(border_color).bg(bg)),
             Span::styled(
                 truncate(preview, area.width.saturating_sub(10) as usize),
-                Style::default()
-                    .fg(if is_selected {
-                        Color::White
-                    } else {
-                        Color::Gray
-                    })
-                    .bg(bg),
+                Style::default().fg(text_color).bg(bg),
             ),
         ]));
     }
 
+    let meta_color = if is_animating {
+        apply_opacity(Color::Cyan, opacity)
+    } else {
+        Color::Cyan
+    };
     let mut meta = vec![
         Span::styled("      ", Style::default().bg(bg)),
-        Span::styled("| ", Style::default().fg(Color::DarkGray).bg(bg)),
+        Span::styled("| ", Style::default().fg(border_color).bg(bg)),
     ];
     if let Some(t) = &event.event.memory_type {
         meta.push(Span::styled(
             format!("type:{} ", t),
-            Style::default().fg(Color::Cyan).bg(bg),
+            Style::default().fg(meta_color).bg(bg),
         ));
     }
     if let Some(m) = &event.event.retrieval_mode {
         meta.push(Span::styled(
             format!("mode:{} ", m),
-            Style::default().fg(Color::Magenta).bg(bg),
+            Style::default().fg(if is_animating { apply_opacity(Color::Magenta, opacity) } else { Color::Magenta }).bg(bg),
         ));
     }
     if let Some(l) = event.event.latency_ms {
         meta.push(Span::styled(
             format!("{:.0}ms ", l),
-            Style::default().fg(Color::Yellow).bg(bg),
+            Style::default().fg(if is_animating { apply_opacity(Color::Yellow, opacity) } else { Color::Yellow }).bg(bg),
         ));
     }
     if let Some(id) = &event.event.memory_id {
         meta.push(Span::styled(
             format!("id:{}", &id[..8.min(id.len())]),
-            Style::default().fg(Color::DarkGray).bg(bg),
+            Style::default().fg(border_color).bg(bg),
         ));
     }
     lines.push(Line::from(meta));
@@ -1336,11 +1454,18 @@ fn render_river_event_selectable(
                 .map(|e| e.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
+            let tag_color = if is_animating {
+                apply_opacity(Color::Green, opacity)
+            } else if glow > 0.0 {
+                glow_color(Color::Green, glow * 0.3)
+            } else {
+                Color::Green
+            };
             lines.push(Line::from(vec![
                 Span::styled("      ", Style::default().bg(bg)),
-                Span::styled("| ", Style::default().fg(Color::DarkGray).bg(bg)),
-                Span::styled("entities: ", Style::default().fg(Color::DarkGray).bg(bg)),
-                Span::styled(truncate(&es, 40), Style::default().fg(Color::Green).bg(bg)),
+                Span::styled("| ", Style::default().fg(border_color).bg(bg)),
+                Span::styled("entities: ", Style::default().fg(border_color).bg(bg)),
+                Span::styled(truncate(&es, 40), Style::default().fg(tag_color).bg(bg)),
             ]));
         }
     }
@@ -1620,12 +1745,13 @@ fn render_graph_map(f: &mut Frame, area: Rect, state: &AppState) {
         .constraints([Constraint::Min(10), Constraint::Length(6)])
         .split(area);
 
-    // TOP: 2D Graph visualization
+    // TOP: 3D Graph visualization with rotation
+    let auto_rotate_indicator = if state.graph_auto_rotate { "⟳" } else { "" };
     let map_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
         .title(Span::styled(
-            " GRAPH MAP ",
+            format!(" GRAPH MAP {} ", auto_rotate_indicator),
             Style::default()
                 .fg(Color::Cyan)
                 .add_modifier(Modifier::BOLD),
@@ -1633,10 +1759,9 @@ fn render_graph_map(f: &mut Frame, area: Rect, state: &AppState) {
         .title(
             block::Title::from(Span::styled(
                 format!(
-                    " {}n {}e d:{:.2} ",
+                    " {}n {}e r/R=rotate ",
                     state.graph_data.nodes.len(),
                     state.graph_data.edges.len(),
-                    state.graph_stats.density
                 ),
                 Style::default().fg(Color::Yellow),
             ))
@@ -1654,31 +1779,54 @@ fn render_graph_map(f: &mut Frame, area: Rect, state: &AppState) {
             map_inner,
         );
     } else {
-        // Create a simple 2D grid representation
+        // Create grid for rendering
         let width = map_inner.width as usize;
         let height = map_inner.height as usize;
-        let mut grid: Vec<Vec<(char, Color)>> = vec![vec![(' ', Color::DarkGray); width]; height];
+        let mut grid: Vec<Vec<(char, Color, f32)>> = vec![vec![(' ', Color::DarkGray, 999.0); width]; height];
 
-        // Draw edges FIRST so nodes appear on top (Bresenham-style)
+        // Project all nodes to 2D with depth
+        let mut projected_nodes: Vec<(usize, f32, f32, f32)> = state
+            .graph_data
+            .nodes
+            .iter()
+            .enumerate()
+            .map(|(i, node)| {
+                let (sx, sy, depth) = node.project_3d(state.graph_rotation, state.graph_tilt);
+                (i, sx, sy, depth)
+            })
+            .collect();
+
+        // Sort by depth (far to near) for proper z-ordering
+        projected_nodes.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal));
+
+        // Draw edges first (at average depth of connected nodes)
         for edge in &state.graph_data.edges {
-            if let (Some(from), Some(to)) = (
-                state.graph_data.nodes.iter().find(|n| n.id == edge.from_id),
-                state.graph_data.nodes.iter().find(|n| n.id == edge.to_id),
-            ) {
-                let x1 = ((from.x * (width - 4) as f32) as i32 + 2).min(width as i32 - 3);
-                let y1 = ((from.y * (height - 2) as f32) as i32 + 1).min(height as i32 - 2);
-                let x2 = ((to.x * (width - 4) as f32) as i32 + 2).min(width as i32 - 3);
-                let y2 = ((to.y * (height - 2) as f32) as i32 + 1).min(height as i32 - 2);
+            let from_proj = state.graph_data.nodes.iter().enumerate()
+                .find(|(_, n)| n.id == edge.from_id)
+                .map(|(_, n)| n.project_3d(state.graph_rotation, state.graph_tilt));
+            let to_proj = state.graph_data.nodes.iter().enumerate()
+                .find(|(_, n)| n.id == edge.to_id)
+                .map(|(_, n)| n.project_3d(state.graph_rotation, state.graph_tilt));
 
-                let edge_color = if edge.weight >= 0.7 {
+            if let (Some((fx, fy, fd)), Some((tx, ty, td))) = (from_proj, to_proj) {
+                let avg_depth = (fd + td) / 2.0;
+                let brightness = 0.3 + (1.0 - ((avg_depth + 1.0) / 2.0).clamp(0.0, 1.0)) * 0.4;
+
+                let x1 = ((fx * (width - 2) as f32) as i32 + 1).clamp(0, width as i32 - 1);
+                let y1 = ((fy * (height - 1) as f32) as i32).clamp(0, height as i32 - 1);
+                let x2 = ((tx * (width - 2) as f32) as i32 + 1).clamp(0, width as i32 - 1);
+                let y2 = ((ty * (height - 1) as f32) as i32).clamp(0, height as i32 - 1);
+
+                let base_color = if edge.weight >= 0.7 {
                     Color::Green
                 } else if edge.weight >= 0.4 {
                     Color::Yellow
                 } else {
-                    Color::Rgb(60, 60, 80)
+                    Color::DarkGray
                 };
+                let edge_color = apply_opacity(base_color, brightness);
 
-                // Bresenham's line algorithm
+                // Bresenham's line
                 let dx = (x2 - x1).abs();
                 let dy = -(y2 - y1).abs();
                 let sx = if x1 < x2 { 1 } else { -1 };
@@ -1691,8 +1839,7 @@ fn render_graph_map(f: &mut Frame, area: Rect, state: &AppState) {
                     if x >= 0 && y >= 0 && (y as usize) < height && (x as usize) < width {
                         let ux = x as usize;
                         let uy = y as usize;
-                        // Don't overwrite nodes, only empty spaces
-                        if grid[uy][ux].0 == ' ' {
+                        if grid[uy][ux].0 == ' ' || grid[uy][ux].2 > avg_depth {
                             let ch = if dx > dy.abs() * 2 {
                                 '─'
                             } else if dy.abs() > dx * 2 {
@@ -1702,7 +1849,7 @@ fn render_graph_map(f: &mut Frame, area: Rect, state: &AppState) {
                             } else {
                                 '╱'
                             };
-                            grid[uy][ux] = (ch, edge_color);
+                            grid[uy][ux] = (ch, edge_color, avg_depth);
                         }
                     }
                     if x == x2 && y == y2 {
@@ -1721,13 +1868,26 @@ fn render_graph_map(f: &mut Frame, area: Rect, state: &AppState) {
             }
         }
 
-        // Place nodes on grid AFTER edges so they appear on top
-        for (i, node) in state.graph_data.nodes.iter().enumerate() {
-            let x = ((node.x * (width - 4) as f32) as usize + 2).min(width - 3);
-            let y = ((node.y * (height - 2) as f32) as usize + 1).min(height - 2);
+        // Draw nodes (depth-sorted, near nodes overwrite far nodes)
+        for (i, sx, sy, depth) in projected_nodes {
+            let node = &state.graph_data.nodes[i];
+            let x = ((sx * (width - 2) as f32) as usize + 1).min(width - 1);
+            let y = ((sy * (height - 1) as f32) as usize).min(height - 1);
             let is_selected = i == state.graph_data.selected_node;
-            let symbol = if is_selected { '◉' } else { '●' };
-            let color = match node.memory_type.to_lowercase().as_str() {
+
+            // Depth-based symbol size (closer = larger symbol)
+            let brightness = node.depth_brightness(depth);
+            let symbol = if is_selected {
+                '◉'
+            } else if depth < -0.3 {
+                '●' // Large/close
+            } else if depth > 0.3 {
+                '•' // Small/far
+            } else {
+                '○' // Medium
+            };
+
+            let base_color = match node.memory_type.to_lowercase().as_str() {
                 "learning" => Color::Green,
                 "context" => Color::Cyan,
                 "decision" => Color::Yellow,
@@ -1737,8 +1897,18 @@ fn render_graph_map(f: &mut Frame, area: Rect, state: &AppState) {
                 "pattern" => Color::LightCyan,
                 _ => Color::White,
             };
+
+            let color = if is_selected {
+                Color::Yellow
+            } else {
+                apply_opacity(base_color, brightness)
+            };
+
             if y < height && x < width {
-                grid[y][x] = (symbol, if is_selected { Color::Yellow } else { color });
+                // Only overwrite if this node is closer (smaller depth)
+                if grid[y][x].2 > depth || is_selected {
+                    grid[y][x] = (symbol, color, depth);
+                }
             }
         }
 
@@ -1748,7 +1918,7 @@ fn render_graph_map(f: &mut Frame, area: Rect, state: &AppState) {
             .map(|row| {
                 Line::from(
                     row.iter()
-                        .map(|(c, color)| Span::styled(c.to_string(), Style::default().fg(*color)))
+                        .map(|(c, color, _)| Span::styled(c.to_string(), Style::default().fg(*color)))
                         .collect::<Vec<_>>(),
                 )
             })
@@ -1756,7 +1926,7 @@ fn render_graph_map(f: &mut Frame, area: Rect, state: &AppState) {
         f.render_widget(Paragraph::new(lines), map_inner);
     }
 
-    // BOTTOM: Selected node info
+    // BOTTOM: Selected node info + controls
     let info_block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::DarkGray))
@@ -1765,11 +1935,19 @@ fn render_graph_map(f: &mut Frame, area: Rect, state: &AppState) {
             Style::default()
                 .fg(Color::Yellow)
                 .add_modifier(Modifier::BOLD),
-        ));
+        ))
+        .title(
+            block::Title::from(Span::styled(
+                " h/l=rotate t=auto w/s=tilt ",
+                Style::default().fg(Color::DarkGray),
+            ))
+            .alignment(Alignment::Right),
+        );
     let info_inner = info_block.inner(chunks[1]);
     f.render_widget(info_block, chunks[1]);
 
     if let Some(node) = state.graph_data.selected() {
+        let (_, _, depth) = node.project_3d(state.graph_rotation, state.graph_tilt);
         let lines = vec![
             Line::from(vec![
                 Span::styled(
@@ -1788,10 +1966,20 @@ fn render_graph_map(f: &mut Frame, area: Rect, state: &AppState) {
                 Style::default().fg(Color::White),
             )),
             Line::from(vec![
-                Span::styled("pos: ", Style::default().fg(Color::DarkGray)),
+                Span::styled("3D: ", Style::default().fg(Color::DarkGray)),
                 Span::styled(
-                    format!("({:.2}, {:.2})", node.x, node.y),
-                    Style::default().fg(Color::DarkGray),
+                    format!("({:.2}, {:.2}, {:.2})", node.x, node.y, node.z),
+                    Style::default().fg(Color::Cyan),
+                ),
+                Span::styled(" rot:", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{:.1}°", state.graph_rotation.to_degrees() % 360.0),
+                    Style::default().fg(Color::Yellow),
+                ),
+                Span::styled(" depth:", Style::default().fg(Color::DarkGray)),
+                Span::styled(
+                    format!("{:.2}", depth),
+                    Style::default().fg(Color::Magenta),
                 ),
             ]),
         ];

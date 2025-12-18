@@ -363,7 +363,7 @@ impl MemoryStream {
         while let Some(event) = es.next().await {
             match event {
                 Ok(Event::Open) => {
-                    self.state.lock().await.connected = true;
+                    self.state.lock().await.set_connected(true);
                 }
                 Ok(Event::Message(msg)) => {
                     if let Ok(e) = serde_json::from_str::<MemoryEvent>(&msg.data) {

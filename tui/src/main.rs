@@ -428,6 +428,32 @@ async fn run_tui(state: Arc<Mutex<AppState>>) -> Result<()> {
                         KeyCode::Char('-') => {
                             g.zoom_out();
                         }
+                        // 3D Graph controls
+                        KeyCode::Char('h') => {
+                            if matches!(g.view_mode, ViewMode::GraphMap) {
+                                g.rotate_graph_left();
+                            }
+                        }
+                        KeyCode::Char('l') => {
+                            if matches!(g.view_mode, ViewMode::GraphMap) {
+                                g.rotate_graph_right();
+                            }
+                        }
+                        KeyCode::Char('t') => {
+                            if matches!(g.view_mode, ViewMode::GraphMap) {
+                                g.toggle_graph_auto_rotate();
+                            }
+                        }
+                        KeyCode::Char('w') => {
+                            if matches!(g.view_mode, ViewMode::GraphMap) {
+                                g.tilt_graph(-0.1);
+                            }
+                        }
+                        KeyCode::Char('s') => {
+                            if matches!(g.view_mode, ViewMode::GraphMap) {
+                                g.tilt_graph(0.1);
+                            }
+                        }
                         KeyCode::Tab => g.cycle_view(),
                         KeyCode::Up | KeyCode::Char('k') => match g.view_mode {
                             ViewMode::Dashboard | ViewMode::ActivityLogs => g.select_event_prev(),
