@@ -274,18 +274,28 @@ pub fn render_header(f: &mut Frame, area: Rect, state: &AppState) {
         right_chunks[1],
     );
 
-    // Activity sparkline - visual heartbeat of the system
-    let sparkline_data = state.get_sparkline_data();
-    if !sparkline_data.is_empty() {
-        let sparkline_str = render_sparkline(&sparkline_data);
-        let sparkline_line = Line::from(vec![
-            Span::styled(sparkline_str, Style::default().fg(Color::Rgb(100, 140, 180))),
-        ]);
-        f.render_widget(
-            Paragraph::new(sparkline_line).alignment(Alignment::Right),
-            right_chunks[2],
-        );
-    }
+    // Activity counter - events per minute
+    let events_per_min = state.events_per_minute();
+    let counter_color = if events_per_min > 10 {
+        Color::Green // High activity
+    } else if events_per_min > 0 {
+        Color::Rgb(100, 180, 220) // Some activity
+    } else {
+        Color::DarkGray // Idle
+    };
+    let arrow = if events_per_min > 0 { "↑" } else { "·" };
+    let counter_line = Line::from(vec![
+        Span::styled(format!("{} ", arrow), Style::default().fg(counter_color)),
+        Span::styled(
+            format!("{}", events_per_min),
+            Style::default().fg(counter_color).add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(" events/min", Style::default().fg(Color::DarkGray)),
+    ]);
+    f.render_widget(
+        Paragraph::new(counter_line).alignment(Alignment::Right),
+        right_chunks[2],
+    );
 
     let session = Line::from(Span::styled(
         state.session_duration(),

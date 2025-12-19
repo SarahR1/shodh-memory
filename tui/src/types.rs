@@ -1426,6 +1426,18 @@ impl AppState {
         }
     }
 
+    /// Get events per minute (based on last 20 seconds, extrapolated)
+    pub fn events_per_minute(&self) -> u32 {
+        let total: u32 = self.activity_sparkline.iter().map(|&x| x as u32).sum();
+        let total = total + self.activity_current_count as u32;
+        let seconds = self.activity_sparkline.len() as u32 + 1;
+        if seconds > 0 {
+            (total * 60) / seconds.max(1)
+        } else {
+            0
+        }
+    }
+
     fn add_entity(&mut self, entity: String) {
         if let Some(pos) = self
             .entity_stats
