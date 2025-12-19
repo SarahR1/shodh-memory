@@ -134,7 +134,13 @@ Measured on Intel i7-1355U (10 cores, 1.7GHz), release build.
 
 ### Installation
 
-**Claude Code / Claude Desktop / Cursor:**
+**Claude Code (CLI):**
+
+```bash
+claude mcp add shodh-memory -- npx -y @shodh/memory-mcp
+```
+
+**Claude Desktop / Cursor:**
 
 Add to your MCP config file:
 ```json
