@@ -88,7 +88,7 @@ fn test_memory_survives_system_restart() {
     {
         let system = MemorySystem::new(config.clone()).expect("Failed to create system");
         let exp = create_experience(original_content, vec!["persistence", "test"]);
-        memory_id = system.record(exp, None).expect("Failed to record");
+        memory_id = system.remember(exp, None).expect("Failed to record");
     }
     // System dropped here - simulates restart
 
@@ -100,7 +100,7 @@ fn test_memory_survives_system_restart() {
             max_results: 10,
             ..Default::default()
         };
-        let results = system.retrieve(&query).expect("Failed to retrieve");
+        let results = system.recall(&query).expect("Failed to retrieve");
 
         assert!(!results.is_empty(), "Memory should survive restart");
         assert!(
@@ -128,12 +128,12 @@ fn test_importance_changes_survive_restart() {
     {
         let system = MemorySystem::new(config.clone()).expect("Failed to create system");
         let exp = create_experience("Important information for testing", vec!["importance"]);
-        memory_id = system.record(exp, None).expect("Failed to record");
+        memory_id = system.remember(exp, None).expect("Failed to record");
 
         // Apply multiple helpful reinforcements
         for _ in 0..10 {
             system
-                .reinforce_retrieval(&[memory_id.clone()], RetrievalOutcome::Helpful)
+                .reinforce_recall(&[memory_id.clone()], RetrievalOutcome::Helpful)
                 .expect("Failed to reinforce");
         }
 
@@ -143,7 +143,7 @@ fn test_importance_changes_survive_restart() {
             max_results: 1,
             ..Default::default()
         };
-        let results = system.retrieve(&query).expect("Failed to retrieve");
+        let results = system.recall(&query).expect("Failed to retrieve");
         final_importance = results[0].importance();
         assert!(final_importance > 0.5, "Importance should have increased");
     }
@@ -190,12 +190,12 @@ fn test_access_count_survives_restart() {
     {
         let system = MemorySystem::new(config.clone()).expect("Failed to create system");
         let exp = create_experience("Access count test memory", vec!["access"]);
-        memory_id = system.record(exp, None).expect("Failed to record");
+        memory_id = system.remember(exp, None).expect("Failed to record");
 
         // Access multiple times through reinforcement
         for _ in 0..5 {
             system
-                .reinforce_retrieval(&[memory_id.clone()], RetrievalOutcome::Neutral)
+                .reinforce_recall(&[memory_id.clone()], RetrievalOutcome::Neutral)
                 .expect("Failed to reinforce");
         }
     }
@@ -208,7 +208,7 @@ fn test_access_count_survives_restart() {
             max_results: 1,
             ..Default::default()
         };
-        let results = system.retrieve(&query).expect("Failed to retrieve");
+        let results = system.recall(&query).expect("Failed to retrieve");
 
         assert!(
             results[0].access_count() >= 5,
@@ -234,7 +234,7 @@ fn test_multiple_memories_survive_restart() {
                 &format!("Memory number {} for batch persistence test", i),
                 vec!["batch", "persistence"],
             );
-            let id = system.record(exp, None).expect("Failed to record");
+            let id = system.remember(exp, None).expect("Failed to record");
             memory_ids.push(id);
         }
     }
@@ -247,7 +247,7 @@ fn test_multiple_memories_survive_restart() {
             max_results: 50,
             ..Default::default()
         };
-        let results = system.retrieve(&query).expect("Failed to retrieve");
+        let results = system.recall(&query).expect("Failed to retrieve");
 
         assert!(
             results.len() >= 15,
@@ -266,7 +266,7 @@ fn test_cache_coherency_importance_visible_immediately() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Cache coherency test memory", vec!["cache"]);
-    let id = system.record(exp, None).expect("Failed to record");
+    let id = system.remember(exp, None).expect("Failed to record");
 
     // Get initial importance through retrieval
     let query = Query {
@@ -274,16 +274,16 @@ fn test_cache_coherency_importance_visible_immediately() {
         max_results: 1,
         ..Default::default()
     };
-    let results = system.retrieve(&query).expect("Failed to retrieve");
+    let results = system.recall(&query).expect("Failed to retrieve");
     let initial_importance = results[0].importance();
 
     // Boost importance
     system
-        .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[id.clone()], RetrievalOutcome::Helpful)
         .expect("Failed to reinforce");
 
     // Verify change is immediately visible through same query
-    let results = system.retrieve(&query).expect("Failed to retrieve");
+    let results = system.recall(&query).expect("Failed to retrieve");
     let new_importance = results[0].importance();
 
     assert!(
@@ -299,7 +299,7 @@ fn test_cache_coherency_multiple_retrievals() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Multi-retrieval coherency test", vec!["multi"]);
-    let id = system.record(exp, None).expect("Failed to record");
+    let id = system.remember(exp, None).expect("Failed to record");
 
     let query = Query {
         query_text: Some("multi-retrieval".to_string()),
@@ -310,18 +310,18 @@ fn test_cache_coherency_multiple_retrievals() {
     // Retrieve, modify, retrieve again multiple times
     for i in 0..5 {
         let before = system
-            .retrieve(&query)
+            .recall(&query)
             .expect("Failed")
             .first()
             .unwrap()
             .importance();
 
         system
-            .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Helpful)
+            .reinforce_recall(&[id.clone()], RetrievalOutcome::Helpful)
             .expect("Failed");
 
         let after = system
-            .retrieve(&query)
+            .recall(&query)
             .expect("Failed")
             .first()
             .unwrap()
@@ -342,7 +342,7 @@ fn test_cache_coherency_decay_visible_immediately() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Decay visibility test", vec!["decay"]);
-    let id = system.record(exp, None).expect("Failed to record");
+    let id = system.remember(exp, None).expect("Failed to record");
 
     let query = Query {
         query_text: Some("decay visibility".to_string()),
@@ -351,7 +351,7 @@ fn test_cache_coherency_decay_visible_immediately() {
     };
 
     let initial = system
-        .retrieve(&query)
+        .recall(&query)
         .expect("Failed")
         .first()
         .unwrap()
@@ -359,11 +359,11 @@ fn test_cache_coherency_decay_visible_immediately() {
 
     // Apply decay
     system
-        .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Misleading)
+        .reinforce_recall(&[id.clone()], RetrievalOutcome::Misleading)
         .expect("Failed");
 
     let after_decay = system
-        .retrieve(&query)
+        .recall(&query)
         .expect("Failed")
         .first()
         .unwrap()
@@ -396,7 +396,7 @@ fn test_concurrent_record_and_retrieve() {
                 &format!("Concurrent write test memory {}", i),
                 vec!["concurrent"],
             );
-            sys.record(exp, None).expect("Failed to record");
+            sys.remember(exp, None).expect("Failed to record");
             drop(sys);
             thread::sleep(Duration::from_millis(10));
         }
@@ -410,7 +410,7 @@ fn test_concurrent_record_and_retrieve() {
             max_results: 20,
             ..Default::default()
         };
-        let _ = sys.retrieve(&query); // May or may not find results
+        let _ = sys.recall(&query); // May or may not find results
         drop(sys);
         thread::sleep(Duration::from_millis(10));
     }
@@ -424,7 +424,7 @@ fn test_concurrent_record_and_retrieve() {
         max_results: 20,
         ..Default::default()
     };
-    let results = sys.retrieve(&query).expect("Failed to retrieve");
+    let results = sys.recall(&query).expect("Failed to retrieve");
     assert!(
         results.len() >= 5,
         "Should find most concurrent writes: found {}",
@@ -439,7 +439,7 @@ fn test_concurrent_reinforcement() {
 
     // Create a memory
     let exp = create_experience("Concurrent reinforcement target", vec!["target"]);
-    let id = system.record(exp, None).expect("Failed to record");
+    let id = system.remember(exp, None).expect("Failed to record");
 
     let system = Arc::new(parking_lot::Mutex::new(system));
     let id_clone = id.clone();
@@ -449,7 +449,7 @@ fn test_concurrent_reinforcement() {
     let booster = thread::spawn(move || {
         for _ in 0..20 {
             let mut sys = system_clone.lock();
-            let _ = sys.reinforce_retrieval(&[id_clone.clone()], RetrievalOutcome::Helpful);
+            let _ = sys.reinforce_recall(&[id_clone.clone()], RetrievalOutcome::Helpful);
             drop(sys);
             thread::sleep(Duration::from_millis(5));
         }
@@ -458,7 +458,7 @@ fn test_concurrent_reinforcement() {
     // Main thread also reinforces
     for _ in 0..20 {
         let mut sys = system.lock();
-        let _ = sys.reinforce_retrieval(&[id.clone()], RetrievalOutcome::Helpful);
+        let _ = sys.reinforce_recall(&[id.clone()], RetrievalOutcome::Helpful);
         drop(sys);
         thread::sleep(Duration::from_millis(5));
     }
@@ -472,7 +472,7 @@ fn test_concurrent_reinforcement() {
         max_results: 1,
         ..Default::default()
     };
-    let results = sys.retrieve(&query).expect("Failed to retrieve");
+    let results = sys.recall(&query).expect("Failed to retrieve");
 
     // After 40 boosts of 0.05 each (starting from ~0.5), should be at max 1.0
     assert!(
@@ -494,7 +494,7 @@ fn test_reinforce_nonexistent_memory() {
 
     // Should not panic, should return stats with 0 processed
     let stats = system
-        .reinforce_retrieval(&[fake_id], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[fake_id], RetrievalOutcome::Helpful)
         .expect("Should not fail");
 
     // The memory wasn't found, so no boosts should have been applied
@@ -507,11 +507,11 @@ fn test_reinforce_mixed_existing_nonexistent() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Real memory for mixed test", vec!["mixed"]);
-    let real_id = system.record(exp, None).expect("Failed to record");
+    let real_id = system.remember(exp, None).expect("Failed to record");
     let fake_id = MemoryId(Uuid::new_v4());
 
     let stats = system
-        .reinforce_retrieval(&[real_id, fake_id], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[real_id, fake_id], RetrievalOutcome::Helpful)
         .expect("Should not fail");
 
     // Should process both attempts
@@ -525,12 +525,12 @@ fn test_importance_bounds_at_maximum() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Max importance test", vec!["max"]);
-    let id = system.record(exp, None).expect("Failed to record");
+    let id = system.remember(exp, None).expect("Failed to record");
 
     // Boost many times to try to exceed 1.0
     for _ in 0..100 {
         system
-            .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Helpful)
+            .reinforce_recall(&[id.clone()], RetrievalOutcome::Helpful)
             .expect("Failed");
     }
 
@@ -539,7 +539,7 @@ fn test_importance_bounds_at_maximum() {
         max_results: 1,
         ..Default::default()
     };
-    let results = system.retrieve(&query).expect("Failed");
+    let results = system.recall(&query).expect("Failed");
 
     assert!(
         results[0].importance() <= 1.0,
@@ -558,12 +558,12 @@ fn test_importance_bounds_at_minimum() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Min importance test", vec!["min"]);
-    let id = system.record(exp, None).expect("Failed to record");
+    let id = system.remember(exp, None).expect("Failed to record");
 
     // Decay many times to try to go below floor
     for _ in 0..100 {
         system
-            .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Misleading)
+            .reinforce_recall(&[id.clone()], RetrievalOutcome::Misleading)
             .expect("Failed");
     }
 
@@ -572,7 +572,7 @@ fn test_importance_bounds_at_minimum() {
         max_results: 1,
         ..Default::default()
     };
-    let results = system.retrieve(&query).expect("Failed");
+    let results = system.recall(&query).expect("Failed");
 
     assert!(
         results[0].importance() >= 0.05,
@@ -586,7 +586,7 @@ fn test_alternating_boost_and_decay() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Alternating reinforcement test", vec!["alternating"]);
-    let id = system.record(exp, None).expect("Failed to record");
+    let id = system.remember(exp, None).expect("Failed to record");
 
     let query = Query {
         query_text: Some("alternating reinforcement".to_string()),
@@ -597,7 +597,7 @@ fn test_alternating_boost_and_decay() {
     let mut importances = Vec::new();
     importances.push(
         system
-            .retrieve(&query)
+            .recall(&query)
             .expect("Failed")
             .first()
             .unwrap()
@@ -608,16 +608,16 @@ fn test_alternating_boost_and_decay() {
     for i in 0..10 {
         if i % 2 == 0 {
             system
-                .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Helpful)
+                .reinforce_recall(&[id.clone()], RetrievalOutcome::Helpful)
                 .expect("Failed");
         } else {
             system
-                .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Misleading)
+                .reinforce_recall(&[id.clone()], RetrievalOutcome::Misleading)
                 .expect("Failed");
         }
         importances.push(
             system
-                .retrieve(&query)
+                .recall(&query)
                 .expect("Failed")
                 .first()
                 .unwrap()
@@ -641,7 +641,7 @@ fn test_empty_reinforcement_list() {
     let (system, _temp_dir) = create_test_system();
 
     let stats = system
-        .reinforce_retrieval(&[], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[], RetrievalOutcome::Helpful)
         .expect("Should not fail on empty list");
 
     assert_eq!(stats.memories_processed, 0);
@@ -656,13 +656,13 @@ fn test_large_batch_reinforcement() {
     let mut ids = Vec::new();
     for i in 0..50 {
         let exp = create_experience(&format!("Large batch memory {}", i), vec!["batch"]);
-        let id = system.record(exp, None).expect("Failed to record");
+        let id = system.remember(exp, None).expect("Failed to record");
         ids.push(id);
     }
 
     // Reinforce all at once
     let stats = system
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .expect("Failed");
 
     assert_eq!(stats.memories_processed, 50);
@@ -689,7 +689,7 @@ fn test_memory_in_working_tier_after_record() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Working tier test memory", vec!["tier"]);
-    let _id = system.record(exp, None).expect("Failed to record");
+    let _id = system.remember(exp, None).expect("Failed to record");
 
     // Immediately retrievable through semantic search
     let query = Query {
@@ -697,7 +697,7 @@ fn test_memory_in_working_tier_after_record() {
         max_results: 1,
         ..Default::default()
     };
-    let results = system.retrieve(&query).expect("Failed");
+    let results = system.recall(&query).expect("Failed");
 
     assert!(
         !results.is_empty(),
@@ -715,7 +715,7 @@ fn test_high_volume_record_and_retrieve() {
             &format!("High volume test memory number {} with unique content", i),
             vec!["volume", &format!("item{}", i)],
         );
-        system.record(exp, None).expect("Failed to record");
+        system.remember(exp, None).expect("Failed to record");
     }
 
     // Verify retrieval still works with semantic search
@@ -725,7 +725,7 @@ fn test_high_volume_record_and_retrieve() {
         max_results: 50,
         ..Default::default()
     };
-    let results = system.retrieve(&query).expect("Failed");
+    let results = system.recall(&query).expect("Failed");
 
     // Semantic search returns approximate nearest neighbors
     // We should get a reasonable number of results
@@ -760,7 +760,7 @@ fn test_rapid_record_retrieve_cycle() {
     // Phase 1: Rapid record
     for i in 0..30 {
         let exp = create_experience(&format!("Rapid cycle memory {}", i), vec!["rapid"]);
-        let id = system.record(exp, None).expect("Failed to record");
+        let id = system.remember(exp, None).expect("Failed to record");
         recorded_ids.push(id);
     }
 
@@ -782,7 +782,7 @@ fn test_rapid_record_retrieve_cycle() {
         max_results: 30,
         ..Default::default()
     };
-    let results = system.retrieve(&query).expect("Failed to retrieve");
+    let results = system.recall(&query).expect("Failed to retrieve");
 
     // Semantic search should find most (not necessarily all due to HNSW approximation)
     assert!(
@@ -800,7 +800,7 @@ fn test_stress_reinforcement_cycles() {
     let mut ids = Vec::new();
     for i in 0..20 {
         let exp = create_experience(&format!("Stress test memory {}", i), vec!["stress"]);
-        let id = system.record(exp, None).expect("Failed to record");
+        let id = system.remember(exp, None).expect("Failed to record");
         ids.push(id);
     }
 
@@ -809,17 +809,17 @@ fn test_stress_reinforcement_cycles() {
         // Random subset
         let subset: Vec<_> = ids.iter().step_by(3).cloned().collect();
         system
-            .reinforce_retrieval(&subset, RetrievalOutcome::Helpful)
+            .reinforce_recall(&subset, RetrievalOutcome::Helpful)
             .expect("Failed");
 
         let subset: Vec<_> = ids.iter().skip(1).step_by(3).cloned().collect();
         system
-            .reinforce_retrieval(&subset, RetrievalOutcome::Neutral)
+            .reinforce_recall(&subset, RetrievalOutcome::Neutral)
             .expect("Failed");
 
         let subset: Vec<_> = ids.iter().skip(2).step_by(3).cloned().collect();
         system
-            .reinforce_retrieval(&subset, RetrievalOutcome::Misleading)
+            .reinforce_recall(&subset, RetrievalOutcome::Misleading)
             .expect("Failed");
     }
 
@@ -829,7 +829,7 @@ fn test_stress_reinforcement_cycles() {
         max_results: 30,
         ..Default::default()
     };
-    let results = system.retrieve(&query).expect("Failed");
+    let results = system.recall(&query).expect("Failed");
 
     assert!(
         results.len() >= 10,

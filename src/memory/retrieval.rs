@@ -1141,7 +1141,7 @@ impl RetrievalEngine {
     /// Search with tracking for later feedback
     ///
     /// Use this when you want to provide feedback on retrieval quality.
-    /// Returns a TrackedRetrieval that can be used with `reinforce_retrieval`.
+    /// Returns a TrackedRetrieval that can be used with `reinforce_recall`.
     pub fn search_tracked(&self, query: &Query, limit: usize) -> Result<TrackedRetrieval> {
         let memories = self.search(query, limit)?;
         Ok(TrackedRetrieval::new(memories, query))
@@ -1155,7 +1155,7 @@ impl RetrievalEngine {
     /// - If outcome is Neutral: just record access (mild reinforcement)
     ///
     /// Call this after a task completes to indicate which memories helped.
-    pub fn reinforce_retrieval(
+    pub fn reinforce_recall(
         &self,
         memory_ids: &[MemoryId],
         outcome: RetrievalOutcome,
@@ -1246,7 +1246,7 @@ impl RetrievalEngine {
         outcome: RetrievalOutcome,
     ) -> Result<ReinforcementStats> {
         let ids = tracked.memory_ids();
-        self.reinforce_retrieval(&ids, outcome)
+        self.reinforce_recall(&ids, outcome)
     }
 
     /// Batch reinforce multiple retrievals (for async feedback processing)
@@ -1259,7 +1259,7 @@ impl RetrievalEngine {
 
         for feedback in feedbacks {
             if let Some(memory_ids) = retrieval_memories.get(&feedback.retrieval_id) {
-                let stats = self.reinforce_retrieval(memory_ids, feedback.outcome)?;
+                let stats = self.reinforce_recall(memory_ids, feedback.outcome)?;
                 results.push(stats);
             }
         }

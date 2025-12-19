@@ -97,7 +97,7 @@ fn populate_memories(system: &MemorySystem, count: usize) -> Vec<shodh_memory::m
 
         let exp = create_experience_with_ner(&content, exp_type, &ner);
 
-        if let Ok(id) = system.record(exp, None) {
+        if let Ok(id) = system.remember(exp, None) {
             ids.push(id);
         }
     }
@@ -129,7 +129,7 @@ fn bench_tracked_retrieval(c: &mut Criterion) {
                             max_results: 10,
                             ..Default::default()
                         };
-                        system.retrieve_tracked(&query).expect("Failed")
+                        system.recall_tracked(&query).expect("Failed")
                     },
                     BatchSize::SmallInput,
                 );
@@ -156,7 +156,7 @@ fn bench_reinforce_helpful(c: &mut Criterion) {
                     },
                     |(system, _temp_dir, ids)| {
                         system
-                            .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+                            .reinforce_recall(&ids, RetrievalOutcome::Helpful)
                             .expect("Failed")
                     },
                     BatchSize::SmallInput,
@@ -184,7 +184,7 @@ fn bench_reinforce_misleading(c: &mut Criterion) {
                     },
                     |(system, _temp_dir, ids)| {
                         system
-                            .reinforce_retrieval(&ids, RetrievalOutcome::Misleading)
+                            .reinforce_recall(&ids, RetrievalOutcome::Misleading)
                             .expect("Failed")
                     },
                     BatchSize::SmallInput,
@@ -212,7 +212,7 @@ fn bench_reinforce_neutral(c: &mut Criterion) {
                     },
                     |(system, _temp_dir, ids)| {
                         system
-                            .reinforce_retrieval(&ids, RetrievalOutcome::Neutral)
+                            .reinforce_recall(&ids, RetrievalOutcome::Neutral)
                             .expect("Failed")
                     },
                     BatchSize::SmallInput,
@@ -243,7 +243,7 @@ fn bench_coactivation_scaling(c: &mut Criterion) {
                 },
                 |(system, _temp_dir, ids)| {
                     system
-                        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+                        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
                         .expect("Failed")
                 },
                 BatchSize::SmallInput,
@@ -272,7 +272,7 @@ fn bench_repeated_reinforcement(c: &mut Criterion) {
                     |(system, _temp_dir, ids)| {
                         for _ in 0..iters {
                             system
-                                .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+                                .reinforce_recall(&ids, RetrievalOutcome::Helpful)
                                 .expect("Failed");
                         }
                     },
@@ -299,7 +299,7 @@ fn bench_graph_stats(c: &mut Criterion) {
 
                 // Build some associations
                 for chunk in ids.chunks(5) {
-                    let _ = system.reinforce_retrieval(chunk, RetrievalOutcome::Helpful);
+                    let _ = system.reinforce_recall(chunk, RetrievalOutcome::Helpful);
                 }
 
                 b.iter(|| system.graph_stats());
@@ -324,7 +324,7 @@ fn bench_graph_maintenance(c: &mut Criterion) {
 
                 // Build associations
                 for chunk in ids.chunks(5) {
-                    let _ = system.reinforce_retrieval(chunk, RetrievalOutcome::Helpful);
+                    let _ = system.reinforce_recall(chunk, RetrievalOutcome::Helpful);
                 }
 
                 b.iter(|| system.graph_maintenance());
@@ -690,11 +690,11 @@ fn bench_full_feedback_loop(c: &mut Criterion) {
                             max_results: 10,
                             ..Default::default()
                         };
-                        let tracked = system.retrieve_tracked(&query).expect("Failed");
+                        let tracked = system.recall_tracked(&query).expect("Failed");
 
                         // 2. Provide feedback
                         system
-                            .reinforce_tracked(&tracked, RetrievalOutcome::Helpful)
+                            .reinforce_recall_tracked(&tracked, RetrievalOutcome::Helpful)
                             .expect("Failed");
 
                         // 3. Get stats
@@ -733,13 +733,13 @@ fn bench_iterative_learning(c: &mut Criterion) {
                                 ..Default::default()
                             };
 
-                            if let Ok(tracked) = system.retrieve_tracked(&query) {
+                            if let Ok(tracked) = system.recall_tracked(&query) {
                                 let outcome = match i % 3 {
                                     0 => RetrievalOutcome::Helpful,
                                     1 => RetrievalOutcome::Neutral,
                                     _ => RetrievalOutcome::Misleading,
                                 };
-                                let _ = system.reinforce_tracked(&tracked, outcome);
+                                let _ = system.reinforce_recall_tracked(&tracked, outcome);
                             }
                         }
                     },

@@ -837,7 +837,7 @@ pub struct Memory {
     pub entity_refs: Vec<EntityRef>,
 
     /// Retrieval tracking ID - set when memory is retrieved
-    /// Used for Hebbian feedback loop (reinforce_retrieval)
+    /// Used for Hebbian feedback loop (reinforce_recall)
     pub last_retrieval_id: Option<Uuid>,
 
     // ==========================================================================

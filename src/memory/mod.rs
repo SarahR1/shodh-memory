@@ -217,10 +217,10 @@ impl MemorySystem {
         })
     }
 
-    /// Record a new experience (takes ownership to avoid clones)
+    /// Store a new memory (takes ownership to avoid clones)
     /// Thread-safe: uses interior mutability for all internal state
     /// If `created_at` is None, uses current time (Utc::now())
-    pub fn record(
+    pub fn remember(
         &self,
         mut experience: Experience,
         created_at: Option<chrono::DateTime<chrono::Utc>>,
@@ -401,13 +401,13 @@ impl MemorySystem {
         Ok(memory_id)
     }
 
-    /// Retrieve relevant memories for current context (zero-copy with Arc<Memory>)
+    /// Search and retrieve relevant memories (zero-copy with Arc<Memory>)
     ///
     /// PRODUCTION IMPLEMENTATION:
     /// - Semantic search: Uses embeddings + vector similarity across ALL tiers
     /// - Non-semantic search: Uses importance * temporal decay
     /// - Zero shortcuts, no TODOs, enterprise-grade
-    pub fn retrieve(&self, query: &Query) -> Result<Vec<SharedMemory>> {
+    pub fn recall(&self, query: &Query) -> Result<Vec<SharedMemory>> {
         // Semantic search requires special handling
         if let Some(query_text) = &query.query_text {
             return self.semantic_retrieve(query_text, query);
@@ -495,7 +495,7 @@ impl MemorySystem {
         Ok(memories)
     }
 
-    /// Paginated memory retrieval with "has_more" indicator (SHO-69)
+    /// Paginated memory recall with "has_more" indicator (SHO-69)
     ///
     /// Returns a PaginatedResults struct containing:
     /// - The page of results
@@ -504,7 +504,7 @@ impl MemorySystem {
     /// - Pagination metadata (offset, limit)
     ///
     /// Uses the limit+1 trick: requests one extra result to detect if there are more.
-    pub fn paginated_retrieve(&self, query: &Query) -> Result<PaginatedResults<SharedMemory>> {
+    pub fn paginated_recall(&self, query: &Query) -> Result<PaginatedResults<SharedMemory>> {
         // Request limit+1 to detect if there are more results
         let extra_limit = query.max_results + 1;
         let mut modified_query = query.clone();
@@ -512,7 +512,7 @@ impl MemorySystem {
         modified_query.offset = 0; // We handle offset ourselves
 
         // Get all results up to extra_limit
-        let all_results = self.retrieve(&modified_query)?;
+        let all_results = self.recall(&modified_query)?;
 
         // Apply offset and limit, detect has_more
         let offset = query.offset;
@@ -530,6 +530,31 @@ impl MemorySystem {
             offset,
             limit,
         })
+    }
+
+    /// Recall memories by tags (fast, no embedding required)
+    ///
+    /// Returns memories that have ANY of the specified tags.
+    pub fn recall_by_tags(&self, tags: &[String], limit: usize) -> Result<Vec<Memory>> {
+        let criteria = storage::SearchCriteria::ByTags(tags.to_vec());
+        let mut memories = self.advanced_search(criteria)?;
+        memories.truncate(limit);
+        Ok(memories)
+    }
+
+    /// Recall memories within a date range
+    ///
+    /// Returns memories created between `start` and `end` (inclusive).
+    pub fn recall_by_date(
+        &self,
+        start: chrono::DateTime<chrono::Utc>,
+        end: chrono::DateTime<chrono::Utc>,
+        limit: usize,
+    ) -> Result<Vec<Memory>> {
+        let criteria = storage::SearchCriteria::ByDate { start, end };
+        let mut memories = self.advanced_search(criteria)?;
+        memories.truncate(limit);
+        Ok(memories)
     }
 
     /// CACHE-AWARE semantic retrieval: Check working → session → storage
@@ -2037,16 +2062,16 @@ impl MemorySystem {
     /// Retrieve memories with tracking for later feedback
     ///
     /// Use this when you want to provide feedback on retrieval quality.
-    /// Returns a TrackedRetrieval that can be used with `reinforce_retrieval`.
+    /// Returns a TrackedRetrieval that can be used with `reinforce_recall`.
     ///
     /// # Example
     /// ```ignore
-    /// let tracked = memory_system.retrieve_tracked(&query)?;
+    /// let tracked = memory_system.recall_tracked(&query)?;
     /// // Use memories...
     /// // Later, after task completion:
-    /// memory_system.reinforce_retrieval(&tracked.memory_ids(), RetrievalOutcome::Helpful)?;
+    /// memory_system.reinforce_recall(&tracked.memory_ids(), RetrievalOutcome::Helpful)?;
     /// ```
-    pub fn retrieve_tracked(&self, query: &Query) -> Result<TrackedRetrieval> {
+    pub fn recall_tracked(&self, query: &Query) -> Result<TrackedRetrieval> {
         self.retriever.search_tracked(query, query.max_results)
     }
 
@@ -2067,7 +2092,7 @@ impl MemorySystem {
     ///
     /// # Returns
     /// Statistics about what was reinforced
-    pub fn reinforce_retrieval(
+    pub fn reinforce_recall(
         &self,
         memory_ids: &[MemoryId],
         outcome: RetrievalOutcome,
@@ -2202,8 +2227,8 @@ impl MemorySystem {
         Ok(stats)
     }
 
-    /// Reinforce using a tracked retrieval (convenience wrapper)
-    pub fn reinforce_tracked(
+    /// Reinforce using a tracked recall (convenience wrapper)
+    pub fn reinforce_recall_tracked(
         &self,
         tracked: &TrackedRetrieval,
         outcome: RetrievalOutcome,

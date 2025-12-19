@@ -336,12 +336,16 @@ fn test_activation_never_zero() {
 fn test_connected_memories_coactivate() {
     let (mut memory, _temp) = setup_memory_system();
 
-    let id1 = memory.record(create_experience("Memory A"), None).unwrap();
-    let id2 = memory.record(create_experience("Memory B"), None).unwrap();
+    let id1 = memory
+        .remember(create_experience("Memory A"), None)
+        .unwrap();
+    let id2 = memory
+        .remember(create_experience("Memory B"), None)
+        .unwrap();
 
     // Connect them via reinforcement
     memory
-        .reinforce_retrieval(&[id1.clone(), id2.clone()], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[id1.clone(), id2.clone()], RetrievalOutcome::Helpful)
         .unwrap();
 
     // Both should be retrievable when searching for either
@@ -351,7 +355,7 @@ fn test_connected_memories_coactivate() {
         ..Default::default()
     };
 
-    let results = memory.retrieve(&query).unwrap();
+    let results = memory.recall(&query).unwrap();
     assert!(results.len() >= 2);
 }
 
@@ -361,22 +365,22 @@ fn test_chain_activation_propagates() {
 
     // Create a chain: A -> B -> C
     let id_a = memory
-        .record(create_experience("Chain start A"), None)
+        .remember(create_experience("Chain start A"), None)
         .unwrap();
     let id_b = memory
-        .record(create_experience("Chain middle B"), None)
+        .remember(create_experience("Chain middle B"), None)
         .unwrap();
     let id_c = memory
-        .record(create_experience("Chain end C"), None)
+        .remember(create_experience("Chain end C"), None)
         .unwrap();
 
     // Connect A-B
     memory
-        .reinforce_retrieval(&[id_a.clone(), id_b.clone()], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[id_a.clone(), id_b.clone()], RetrievalOutcome::Helpful)
         .unwrap();
     // Connect B-C
     memory
-        .reinforce_retrieval(&[id_b.clone(), id_c.clone()], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[id_b.clone(), id_c.clone()], RetrievalOutcome::Helpful)
         .unwrap();
 
     // Query should find all three
@@ -386,7 +390,7 @@ fn test_chain_activation_propagates() {
         ..Default::default()
     };
 
-    let results = memory.retrieve(&query).unwrap();
+    let results = memory.recall(&query).unwrap();
     assert!(results.len() >= 3);
 }
 
@@ -396,10 +400,10 @@ fn test_disconnected_memories_independent() {
 
     // Create two unconnected memories
     let _id1 = memory
-        .record(create_experience("Topic alpha"), None)
+        .remember(create_experience("Topic alpha"), None)
         .unwrap();
     let _id2 = memory
-        .record(create_experience("Topic beta"), None)
+        .remember(create_experience("Topic beta"), None)
         .unwrap();
 
     // Query for alpha - should not strongly include beta
@@ -409,7 +413,7 @@ fn test_disconnected_memories_independent() {
         ..Default::default()
     };
 
-    let results = memory.retrieve(&query).unwrap();
+    let results = memory.recall(&query).unwrap();
     // Results should exist (at least alpha)
     assert!(!results.is_empty());
 }
@@ -420,19 +424,19 @@ fn test_hub_memory_activates_many() {
 
     // Create hub and spokes
     let hub = memory
-        .record(create_experience("Central hub memory"), None)
+        .remember(create_experience("Central hub memory"), None)
         .unwrap();
     let mut spokes = Vec::new();
 
     for i in 0..5 {
         let spoke = memory
-            .record(
+            .remember(
                 create_experience(&format!("Spoke {} connected to hub", i)),
                 None,
             )
             .unwrap();
         memory
-            .reinforce_retrieval(&[hub.clone(), spoke.clone()], RetrievalOutcome::Helpful)
+            .reinforce_recall(&[hub.clone(), spoke.clone()], RetrievalOutcome::Helpful)
             .unwrap();
         spokes.push(spoke);
     }
@@ -444,7 +448,7 @@ fn test_hub_memory_activates_many() {
         ..Default::default()
     };
 
-    let results = memory.retrieve(&query).unwrap();
+    let results = memory.recall(&query).unwrap();
     assert!(results.len() >= 1);
 }
 
@@ -826,23 +830,23 @@ fn test_triangle_activation() {
 
     // Create triangle: A-B, B-C, C-A
     let id_a = memory
-        .record(create_experience("Triangle vertex A"), None)
+        .remember(create_experience("Triangle vertex A"), None)
         .unwrap();
     let id_b = memory
-        .record(create_experience("Triangle vertex B"), None)
+        .remember(create_experience("Triangle vertex B"), None)
         .unwrap();
     let id_c = memory
-        .record(create_experience("Triangle vertex C"), None)
+        .remember(create_experience("Triangle vertex C"), None)
         .unwrap();
 
     memory
-        .reinforce_retrieval(&[id_a.clone(), id_b.clone()], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[id_a.clone(), id_b.clone()], RetrievalOutcome::Helpful)
         .unwrap();
     memory
-        .reinforce_retrieval(&[id_b.clone(), id_c.clone()], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[id_b.clone(), id_c.clone()], RetrievalOutcome::Helpful)
         .unwrap();
     memory
-        .reinforce_retrieval(&[id_c.clone(), id_a.clone()], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[id_c.clone(), id_a.clone()], RetrievalOutcome::Helpful)
         .unwrap();
 
     // Query should find all three
@@ -852,7 +856,7 @@ fn test_triangle_activation() {
         ..Default::default()
     };
 
-    let results = memory.retrieve(&query).unwrap();
+    let results = memory.recall(&query).unwrap();
     assert!(results.len() >= 3);
 }
 
@@ -862,15 +866,15 @@ fn test_star_activation() {
 
     // Create star: center connected to 5 leaves
     let center = memory
-        .record(create_experience("Star center"), None)
+        .remember(create_experience("Star center"), None)
         .unwrap();
 
     for i in 0..5 {
         let leaf = memory
-            .record(create_experience(&format!("Star leaf {}", i)), None)
+            .remember(create_experience(&format!("Star leaf {}", i)), None)
             .unwrap();
         memory
-            .reinforce_retrieval(&[center.clone(), leaf], RetrievalOutcome::Helpful)
+            .reinforce_recall(&[center.clone(), leaf], RetrievalOutcome::Helpful)
             .unwrap();
     }
 
@@ -881,7 +885,7 @@ fn test_star_activation() {
         ..Default::default()
     };
 
-    let results = memory.retrieve(&query).unwrap();
+    let results = memory.recall(&query).unwrap();
     assert!(!results.is_empty());
 }
 
@@ -896,14 +900,14 @@ fn test_bipartite_activation() {
     for i in 0..3 {
         group_a.push(
             memory
-                .record(create_experience(&format!("Group A member {}", i)), None)
+                .remember(create_experience(&format!("Group A member {}", i)), None)
                 .unwrap(),
         );
     }
     for i in 0..3 {
         group_b.push(
             memory
-                .record(create_experience(&format!("Group B member {}", i)), None)
+                .remember(create_experience(&format!("Group B member {}", i)), None)
                 .unwrap(),
         );
     }
@@ -912,7 +916,7 @@ fn test_bipartite_activation() {
     for a in &group_a {
         for b in &group_b {
             memory
-                .reinforce_retrieval(&[a.clone(), b.clone()], RetrievalOutcome::Helpful)
+                .reinforce_recall(&[a.clone(), b.clone()], RetrievalOutcome::Helpful)
                 .unwrap();
         }
     }
@@ -924,7 +928,7 @@ fn test_bipartite_activation() {
         ..Default::default()
     };
 
-    let results = memory.retrieve(&query).unwrap();
+    let results = memory.recall(&query).unwrap();
     assert!(results.len() >= 6);
 }
 

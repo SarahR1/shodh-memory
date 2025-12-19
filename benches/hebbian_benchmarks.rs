@@ -54,7 +54,7 @@ fn bench_graph_stats(c: &mut Criterion) {
                 let ids: Vec<_> = (0..count)
                     .map(|i| {
                         memory
-                            .record(
+                            .remember(
                                 Experience {
                                     content: format!("Graph stats test memory {}", i),
                                     ..Default::default()
@@ -69,7 +69,7 @@ fn bench_graph_stats(c: &mut Criterion) {
                 for chunk in ids.chunks(5) {
                     if chunk.len() >= 2 {
                         memory
-                            .reinforce_retrieval(&chunk.to_vec(), RetrievalOutcome::Helpful)
+                            .reinforce_recall(&chunk.to_vec(), RetrievalOutcome::Helpful)
                             .unwrap();
                     }
                 }
@@ -90,7 +90,7 @@ fn bench_edge_formation(c: &mut Criterion) {
     let mut group = c.benchmark_group("hebbian_edge_formation");
     group.sample_size(20);
 
-    // Measure edge formation via reinforce_retrieval
+    // Measure edge formation via reinforce_recall
     for pair_count in [2, 5, 10, 20] {
         group.bench_with_input(
             BenchmarkId::new("form_edges", pair_count),
@@ -102,7 +102,7 @@ fn bench_edge_formation(c: &mut Criterion) {
                         let ids: Vec<_> = (0..pair_count)
                             .map(|i| {
                                 memory
-                                    .record(
+                                    .remember(
                                         Experience {
                                             content: format!("Edge formation memory {}", i),
                                             ..Default::default()
@@ -117,7 +117,7 @@ fn bench_edge_formation(c: &mut Criterion) {
                     |(mut memory, _temp, ids)| {
                         // This forms (n*(n-1))/2 edges between all pairs
                         memory
-                            .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+                            .reinforce_recall(&ids, RetrievalOutcome::Helpful)
                             .unwrap();
                     },
                     BatchSize::SmallInput,
@@ -148,7 +148,7 @@ fn bench_edge_strengthening(c: &mut Criterion) {
                         let (mut memory, temp) = setup_memory_system();
                         // Create two memories to form an edge between
                         let id1 = memory
-                            .record(
+                            .remember(
                                 Experience {
                                     content: "First memory for edge".to_string(),
                                     ..Default::default()
@@ -157,7 +157,7 @@ fn bench_edge_strengthening(c: &mut Criterion) {
                             )
                             .unwrap();
                         let id2 = memory
-                            .record(
+                            .remember(
                                 Experience {
                                     content: "Second memory for edge".to_string(),
                                     ..Default::default()
@@ -168,7 +168,7 @@ fn bench_edge_strengthening(c: &mut Criterion) {
 
                         // Form initial edge
                         memory
-                            .reinforce_retrieval(
+                            .reinforce_recall(
                                 &vec![id1.clone(), id2.clone()],
                                 RetrievalOutcome::Helpful,
                             )
@@ -180,7 +180,7 @@ fn bench_edge_strengthening(c: &mut Criterion) {
                         // Strengthen edge multiple times
                         for _ in 0..coactivation_count {
                             memory
-                                .reinforce_retrieval(
+                                .reinforce_recall(
                                     &vec![id1.clone(), id2.clone()],
                                     RetrievalOutcome::Helpful,
                                 )
@@ -231,7 +231,7 @@ fn bench_graph_persistence(c: &mut Criterion) {
                         let ids: Vec<_> = (0..memory_count)
                             .map(|i| {
                                 memory
-                                    .record(
+                                    .remember(
                                         Experience {
                                             content: format!("Persistence test {}", i),
                                             ..Default::default()
@@ -246,7 +246,7 @@ fn bench_graph_persistence(c: &mut Criterion) {
                         for chunk in ids.chunks(5) {
                             if chunk.len() >= 2 {
                                 memory
-                                    .reinforce_retrieval(&chunk.to_vec(), RetrievalOutcome::Helpful)
+                                    .reinforce_recall(&chunk.to_vec(), RetrievalOutcome::Helpful)
                                     .unwrap();
                             }
                         }
@@ -297,7 +297,7 @@ fn bench_associative_retrieval(c: &mut Criterion) {
                     .into_iter()
                     .map(|c| {
                         memory
-                            .record(
+                            .remember(
                                 Experience {
                                     content: c.to_string(),
                                     ..Default::default()
@@ -310,12 +310,12 @@ fn bench_associative_retrieval(c: &mut Criterion) {
 
                 // Form associations between Rust-related memories
                 memory
-                    .reinforce_retrieval(&ids[0..3].to_vec(), RetrievalOutcome::Helpful)
+                    .reinforce_recall(&ids[0..3].to_vec(), RetrievalOutcome::Helpful)
                     .unwrap();
 
                 // Form associations between Python-related memories
                 memory
-                    .reinforce_retrieval(&ids[3..5].to_vec(), RetrievalOutcome::Helpful)
+                    .reinforce_recall(&ids[3..5].to_vec(), RetrievalOutcome::Helpful)
                     .unwrap();
 
                 (memory, temp)
@@ -327,7 +327,7 @@ fn bench_associative_retrieval(c: &mut Criterion) {
                     max_results: 5,
                     ..Default::default()
                 };
-                let _results = memory.retrieve(&query).unwrap();
+                let _results = memory.recall(&query).unwrap();
             },
             BatchSize::SmallInput,
         );
@@ -350,7 +350,7 @@ fn bench_ltp_threshold(c: &mut Criterion) {
             || {
                 let (mut memory, temp) = setup_memory_system();
                 let id1 = memory
-                    .record(
+                    .remember(
                         Experience {
                             content: "LTP memory 1".to_string(),
                             ..Default::default()
@@ -359,7 +359,7 @@ fn bench_ltp_threshold(c: &mut Criterion) {
                     )
                     .unwrap();
                 let id2 = memory
-                    .record(
+                    .remember(
                         Experience {
                             content: "LTP memory 2".to_string(),
                             ..Default::default()
@@ -373,7 +373,7 @@ fn bench_ltp_threshold(c: &mut Criterion) {
                 // Reach LTP threshold (5 coactivations)
                 for _ in 0..5 {
                     memory
-                        .reinforce_retrieval(
+                        .reinforce_recall(
                             &vec![id1.clone(), id2.clone()],
                             RetrievalOutcome::Helpful,
                         )
@@ -408,7 +408,7 @@ fn bench_large_graph_operations(c: &mut Criterion) {
                 let ids: Vec<_> = (0..1000)
                     .map(|i| {
                         memory
-                            .record(
+                            .remember(
                                 Experience {
                                     content: format!("Large graph memory {} with some content", i),
                                     ..Default::default()
@@ -423,7 +423,7 @@ fn bench_large_graph_operations(c: &mut Criterion) {
                 for chunk in ids.chunks(5) {
                     if chunk.len() >= 2 {
                         memory
-                            .reinforce_retrieval(&chunk.to_vec(), RetrievalOutcome::Helpful)
+                            .reinforce_recall(&chunk.to_vec(), RetrievalOutcome::Helpful)
                             .unwrap();
                     }
                 }

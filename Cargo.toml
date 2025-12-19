@@ -1,6 +1,6 @@
 [package]
 name = "shodh-memory"
-version = "0.1.6"
+version = "0.1.61"
 edition = "2021"
 authors = ["Shodh Team <29.varuns@gmail.com>"]
 description = "Persistent memory for AI agents and edge devices - 3-tier memory, Hebbian learning, knowledge graph. Single binary, runs offline."
@@ -18,11 +18,36 @@ exclude = [
     "*.exe",
     "*.tar.gz",
     "*.dll",
+    "*.zip",
+    "*.whl",
     "job_log.txt",
     "macos_log.txt",
     ".mcp.json",
     "nul",
     "install_bun.ps1",
+    ".venv/",
+    "assets/",
+    "benchmarks/",
+    "benchmark_report.json",
+    "bugs-remedies/",
+    "docker-compose.yml",
+    "Dockerfile",
+    "examples/",
+    "hooks/",
+    "marketing/",
+    "notebooks/",
+    "release-test/",
+    "seps/",
+    "skills/",
+    "test_*/",
+    "*.md",
+    "!README-rust.md",
+    "openapi.yaml",
+    "shodh_logo_nobackground.png",
+    "shodh_config.example.json",
+    "STPI_PITCH_DECK.md",
+    ".github/",
+    "pyproject.toml",
 ]
 
 [lib]

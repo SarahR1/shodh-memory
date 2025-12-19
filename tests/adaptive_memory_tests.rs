@@ -126,6 +126,9 @@ fn create_rich_context(project_id: Option<String>, code_ctx: Option<CodeContext>
         code: code_ctx.unwrap_or_default(),
         document: DocumentContext::default(),
         environment: EnvironmentContext::default(),
+        emotional: Default::default(),
+        source: Default::default(),
+        episode: Default::default(),
         parent: None,
         embeddings: None,
         decay_rate: 0.1,
@@ -168,8 +171,8 @@ fn test_tracked_retrieval_creation() {
         vec!["rust", "borrow_checker"],
     );
 
-    system.record(exp1, None).expect("Failed to record");
-    system.record(exp2, None).expect("Failed to record");
+    system.remember(exp1, None).expect("Failed to record");
+    system.remember(exp2, None).expect("Failed to record");
 
     let query = Query {
         query_text: Some("rust memory safety".to_string()),
@@ -178,7 +181,7 @@ fn test_tracked_retrieval_creation() {
     };
 
     let tracked = system
-        .retrieve_tracked(&query)
+        .recall_tracked(&query)
         .expect("Failed to retrieve tracked");
 
     assert!(!tracked.retrieval_id.is_empty());
@@ -191,7 +194,7 @@ fn test_tracked_retrieval_memory_ids() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_learning_experience("Test content", vec!["test"]);
-    let id = system.record(exp, None).expect("Failed to record");
+    let id = system.remember(exp, None).expect("Failed to record");
 
     let query = Query {
         query_text: Some("test content".to_string()),
@@ -199,7 +202,7 @@ fn test_tracked_retrieval_memory_ids() {
         ..Default::default()
     };
 
-    let tracked = system.retrieve_tracked(&query).expect("Failed");
+    let tracked = system.recall_tracked(&query).expect("Failed");
     let ids = tracked.memory_ids();
 
     assert!(ids.iter().any(|i| i == &id));
@@ -214,12 +217,12 @@ fn test_reinforce_helpful_outcome() {
     let exp2 = create_learning_experience("JWT token validation process", vec!["jwt", "auth"]);
     let exp3 = create_learning_experience("OAuth2 flow implementation", vec!["oauth", "auth"]);
 
-    let id1 = system.record(exp1, None).expect("Failed");
-    let id2 = system.record(exp2, None).expect("Failed");
-    let id3 = system.record(exp3, None).expect("Failed");
+    let id1 = system.remember(exp1, None).expect("Failed");
+    let id2 = system.remember(exp2, None).expect("Failed");
+    let id3 = system.remember(exp3, None).expect("Failed");
 
     let stats = system
-        .reinforce_retrieval(
+        .reinforce_recall(
             &[id1.clone(), id2.clone(), id3.clone()],
             RetrievalOutcome::Helpful,
         )
@@ -237,7 +240,7 @@ fn test_reinforce_misleading_outcome() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_learning_experience("Misleading information", vec!["test"]);
-    let id = system.record(exp, None).expect("Failed");
+    let id = system.remember(exp, None).expect("Failed");
 
     let initial_importance = {
         let query = Query {
@@ -245,14 +248,14 @@ fn test_reinforce_misleading_outcome() {
             max_results: 1,
             ..Default::default()
         };
-        let results = system.retrieve(&query).expect("Failed");
+        let results = system.recall(&query).expect("Failed");
         results[0].importance()
     };
 
     // Apply multiple misleading reinforcements to ensure measurable decay
     for _ in 0..5 {
         let stats = system
-            .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Misleading)
+            .reinforce_recall(&[id.clone()], RetrievalOutcome::Misleading)
             .expect("Failed");
         assert_eq!(stats.memories_processed, 1);
         assert_eq!(stats.importance_decays, 1);
@@ -265,7 +268,7 @@ fn test_reinforce_misleading_outcome() {
         max_results: 1,
         ..Default::default()
     };
-    let results = system.retrieve(&query).expect("Failed");
+    let results = system.recall(&query).expect("Failed");
     let final_importance = results[0].importance();
     // After 5 decays of 10% each: 0.9^5 = 0.59 of original
     assert!(
@@ -284,11 +287,11 @@ fn test_reinforce_neutral_outcome() {
     let exp1 = create_learning_experience("First neutral memory", vec!["neutral"]);
     let exp2 = create_learning_experience("Second neutral memory", vec!["neutral"]);
 
-    let id1 = system.record(exp1, None).expect("Failed");
-    let id2 = system.record(exp2, None).expect("Failed");
+    let id1 = system.remember(exp1, None).expect("Failed");
+    let id2 = system.remember(exp2, None).expect("Failed");
 
     let stats = system
-        .reinforce_retrieval(&[id1, id2], RetrievalOutcome::Neutral)
+        .reinforce_recall(&[id1, id2], RetrievalOutcome::Neutral)
         .expect("Failed");
 
     assert_eq!(stats.memories_processed, 2);
@@ -302,7 +305,7 @@ fn test_reinforce_empty_list() {
     let (system, _temp_dir) = create_test_system();
 
     let stats = system
-        .reinforce_retrieval(&[], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[], RetrievalOutcome::Helpful)
         .expect("Failed");
 
     assert_eq!(stats.memories_processed, 0);
@@ -314,7 +317,7 @@ fn test_reinforce_tracked_convenience() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_learning_experience("Tracked memory test", vec!["tracked"]);
-    system.record(exp, None).expect("Failed");
+    system.remember(exp, None).expect("Failed");
 
     let query = Query {
         query_text: Some("tracked memory".to_string()),
@@ -322,9 +325,9 @@ fn test_reinforce_tracked_convenience() {
         ..Default::default()
     };
 
-    let tracked = system.retrieve_tracked(&query).expect("Failed");
+    let tracked = system.recall_tracked(&query).expect("Failed");
     let stats = system
-        .reinforce_tracked(&tracked, RetrievalOutcome::Helpful)
+        .reinforce_recall_tracked(&tracked, RetrievalOutcome::Helpful)
         .expect("Failed");
 
     assert!(stats.memories_processed > 0);
@@ -335,13 +338,13 @@ fn test_importance_boost_cumulative() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_learning_experience("Memory that gets boosted multiple times", vec!["boost"]);
-    let id = system.record(exp, None).expect("Failed");
+    let id = system.remember(exp, None).expect("Failed");
 
     // Verify the boost mechanism reports correct stats
     let mut total_boosts = 0;
     for _ in 0..10 {
         let stats = system
-            .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Helpful)
+            .reinforce_recall(&[id.clone()], RetrievalOutcome::Helpful)
             .expect("Failed");
         assert_eq!(stats.importance_boosts, 1);
         total_boosts += stats.importance_boosts;
@@ -356,13 +359,13 @@ fn test_importance_decay_floor() {
     let (mut system, _temp_dir) = create_test_system();
 
     let exp = create_learning_experience("Memory that gets decayed to minimum", vec!["decay"]);
-    let id = system.record(exp, None).expect("Failed");
+    let id = system.remember(exp, None).expect("Failed");
 
     // Verify decay mechanism reports correctly
     let mut total_decays = 0;
     for _ in 0..20 {
         let stats = system
-            .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Misleading)
+            .reinforce_recall(&[id.clone()], RetrievalOutcome::Misleading)
             .expect("Failed");
         assert_eq!(stats.importance_decays, 1);
         total_decays += 1;
@@ -380,15 +383,15 @@ fn test_coactivation_strengthens_graph() {
     let exp2 = create_learning_experience("Query optimization techniques", vec!["database"]);
     let exp3 = create_learning_experience("Index design patterns", vec!["database"]);
 
-    let id1 = system.record(exp1, None).expect("Failed");
-    let id2 = system.record(exp2, None).expect("Failed");
-    let id3 = system.record(exp3, None).expect("Failed");
+    let id1 = system.remember(exp1, None).expect("Failed");
+    let id2 = system.remember(exp2, None).expect("Failed");
+    let id3 = system.remember(exp3, None).expect("Failed");
 
     let initial_stats = system.graph_stats();
 
     for _ in 0..5 {
         system
-            .reinforce_retrieval(
+            .reinforce_recall(
                 &[id1.clone(), id2.clone(), id3.clone()],
                 RetrievalOutcome::Helpful,
             )
@@ -924,7 +927,7 @@ fn test_adaptive_memory_workflow() {
 
     let mut ids = Vec::new();
     for exp in experiences {
-        ids.push(system.record(exp, None).expect("Failed to record"));
+        ids.push(system.remember(exp, None).expect("Failed to record"));
     }
 
     let query = Query {
@@ -933,11 +936,11 @@ fn test_adaptive_memory_workflow() {
         ..Default::default()
     };
 
-    let tracked = system.retrieve_tracked(&query).expect("Failed");
+    let tracked = system.recall_tracked(&query).expect("Failed");
     assert!(!tracked.memories.is_empty());
 
     let stats = system
-        .reinforce_tracked(&tracked, RetrievalOutcome::Helpful)
+        .reinforce_recall_tracked(&tracked, RetrievalOutcome::Helpful)
         .expect("Failed");
     assert!(stats.memories_processed > 0);
 
@@ -961,11 +964,11 @@ fn test_graph_maintenance() {
     let exp1 = create_learning_experience("First memory", vec!["test"]);
     let exp2 = create_learning_experience("Second memory", vec!["test"]);
 
-    let id1 = system.record(exp1, None).expect("Failed");
-    let id2 = system.record(exp2, None).expect("Failed");
+    let id1 = system.remember(exp1, None).expect("Failed");
+    let id2 = system.remember(exp2, None).expect("Failed");
 
     system
-        .reinforce_retrieval(&[id1, id2], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[id1, id2], RetrievalOutcome::Helpful)
         .expect("Failed");
 
     system.graph_maintenance();
@@ -1005,12 +1008,12 @@ fn test_high_volume_reinforcement() {
     for i in 0..50 {
         let exp =
             create_learning_experience(&format!("High volume memory {i}"), vec!["stress", "test"]);
-        ids.push(system.record(exp, None).expect("Failed"));
+        ids.push(system.remember(exp, None).expect("Failed"));
     }
 
     for chunk in ids.chunks(10) {
         let stats = system
-            .reinforce_retrieval(chunk, RetrievalOutcome::Helpful)
+            .reinforce_recall(chunk, RetrievalOutcome::Helpful)
             .expect("Failed");
         assert!(stats.memories_processed > 0);
     }
@@ -1022,14 +1025,14 @@ fn test_rapid_feedback_cycles() {
 
     for i in 0..20 {
         let exp = create_learning_experience(&format!("Cycle {i}"), vec!["cycle"]);
-        let _id = system.record(exp, None).expect("Failed");
+        let _id = system.remember(exp, None).expect("Failed");
 
         let query = Query {
             query_text: Some(format!("cycle {i}")),
             max_results: 5,
             ..Default::default()
         };
-        let tracked = system.retrieve_tracked(&query).expect("Failed");
+        let tracked = system.recall_tracked(&query).expect("Failed");
 
         let outcome = if i % 3 == 0 {
             RetrievalOutcome::Helpful
@@ -1039,7 +1042,9 @@ fn test_rapid_feedback_cycles() {
             RetrievalOutcome::Neutral
         };
 
-        system.reinforce_tracked(&tracked, outcome).expect("Failed");
+        system
+            .reinforce_recall_tracked(&tracked, outcome)
+            .expect("Failed");
     }
 
     let stats = system.stats();

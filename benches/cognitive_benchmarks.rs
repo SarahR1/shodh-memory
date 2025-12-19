@@ -56,7 +56,7 @@ fn populate_memories(memory: &mut MemorySystem, count: usize) {
             entities: entity_names,
             ..Default::default()
         };
-        memory.record(exp, None).expect("Failed to record");
+        memory.remember(exp, None).expect("Failed to record");
     }
 }
 
@@ -382,7 +382,7 @@ fn bench_hebbian_reinforcement(c: &mut Criterion) {
             || {
                 let (mut memory, temp) = setup_memory_system();
                 let id = memory
-                    .record(
+                    .remember(
                         Experience {
                             content: "Test memory".to_string(),
                             ..Default::default()
@@ -394,7 +394,7 @@ fn bench_hebbian_reinforcement(c: &mut Criterion) {
             },
             |(mut memory, _temp, ids)| {
                 memory
-                    .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+                    .reinforce_recall(&ids, RetrievalOutcome::Helpful)
                     .unwrap()
             },
             BatchSize::SmallInput,
@@ -413,7 +413,7 @@ fn bench_hebbian_reinforcement(c: &mut Criterion) {
                         let ids: Vec<_> = (0..count)
                             .map(|i| {
                                 memory
-                                    .record(
+                                    .remember(
                                         Experience {
                                             content: format!("Memory {}", i),
                                             ..Default::default()
@@ -427,7 +427,7 @@ fn bench_hebbian_reinforcement(c: &mut Criterion) {
                     },
                     |(mut memory, _temp, ids)| {
                         memory
-                            .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+                            .reinforce_recall(&ids, RetrievalOutcome::Helpful)
                             .unwrap()
                     },
                     BatchSize::SmallInput,
@@ -458,13 +458,13 @@ fn bench_full_feedback_loop(c: &mut Criterion) {
                     max_results: 5,
                     ..Default::default()
                 };
-                let results = memory.retrieve(&query).unwrap();
+                let results = memory.recall(&query).unwrap();
 
                 // Reinforce
                 let ids: Vec<_> = results.iter().map(|m| m.id.clone()).collect();
                 if !ids.is_empty() {
                     memory
-                        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+                        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
                         .unwrap();
                 }
             },

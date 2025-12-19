@@ -950,9 +950,9 @@ impl StreamingMemoryExtractor {
                 ..Default::default()
             };
 
-            // Store memory using record() method
+            // Store memory using remember() method
             let memory_sys = memory_system.read();
-            match memory_sys.record(experience, Some(msg.timestamp)) {
+            match memory_sys.remember(experience, Some(msg.timestamp)) {
                 // Use message timestamp
                 Ok(memory_id) => {
                     // MemoryId is a newtype around Uuid - access inner uuid for string

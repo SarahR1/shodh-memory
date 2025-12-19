@@ -101,7 +101,7 @@ fn test_brutal_concurrent_writes() {
                     ),
                     vec!["stress", "concurrent", &format!("thread{}", thread_id)],
                 );
-                match sys.record(exp, None) {
+                match sys.remember(exp, None) {
                     Ok(_) => success.fetch_add(1, Ordering::SeqCst),
                     Err(_) => errors.fetch_add(1, Ordering::SeqCst),
                 };
@@ -142,7 +142,7 @@ fn test_brutal_concurrent_read_write() {
             &format!("Pre-populated memory {} for concurrent test", i),
             vec!["prepop"],
         );
-        system.record(exp, None).expect("Failed to prepopulate");
+        system.remember(exp, None).expect("Failed to prepopulate");
     }
 
     let system = Arc::new(system); // No external lock - internally thread-safe
@@ -162,7 +162,7 @@ fn test_brutal_concurrent_read_write() {
                     &format!("Writer {} memory {}", thread_id, i),
                     vec!["writer"],
                 );
-                if sys.record(exp, None).is_ok() {
+                if sys.remember(exp, None).is_ok() {
                     writes.fetch_add(1, Ordering::SeqCst);
                 }
             }
@@ -182,7 +182,7 @@ fn test_brutal_concurrent_read_write() {
                     max_results: 10,
                     ..Default::default()
                 };
-                if sys.retrieve(&query).is_ok() {
+                if sys.recall(&query).is_ok() {
                     reads.fetch_add(1, Ordering::SeqCst);
                 }
             }
@@ -219,7 +219,7 @@ fn test_brutal_concurrent_reinforcement_race() {
     let mut ids = Vec::new();
     for i in 0..10 {
         let exp = create_experience(&format!("Race target {}", i), vec!["race"]);
-        ids.push(system.record(exp, None).expect("Failed"));
+        ids.push(system.remember(exp, None).expect("Failed"));
     }
 
     let ids = Arc::new(ids);
@@ -235,7 +235,7 @@ fn test_brutal_concurrent_reinforcement_race() {
         let handle = thread::spawn(move || {
             for _ in 0..20 {
                 // Each thread reinforces all memories
-                let _ = sys.reinforce_retrieval(&mem_ids, RetrievalOutcome::Helpful);
+                let _ = sys.reinforce_recall(&mem_ids, RetrievalOutcome::Helpful);
             }
         });
         handles.push(handle);
@@ -293,7 +293,7 @@ fn test_brutal_multiple_restart_cycles() {
                 &format!("Restart cycle {} memory {}", cycle, i),
                 vec!["restart"],
             );
-            let id = system.record(exp, None).expect("Failed to record");
+            let id = system.remember(exp, None).expect("Failed to record");
             all_ids.push(id);
         }
 
@@ -301,7 +301,7 @@ fn test_brutal_multiple_restart_cycles() {
         if !all_ids.is_empty() {
             let subset: Vec<_> = all_ids.iter().step_by(3).cloned().collect();
             system
-                .reinforce_retrieval(&subset, RetrievalOutcome::Helpful)
+                .reinforce_recall(&subset, RetrievalOutcome::Helpful)
                 .expect("Failed");
         }
     }
@@ -336,13 +336,13 @@ fn test_brutal_partial_write_recovery() {
              Failure to preserve this would be catastrophic for the entire system.",
             vec!["crash", "recovery", "critical"],
         );
-        memory_id = system.record(exp, None).expect("Failed to record");
+        memory_id = system.remember(exp, None).expect("Failed to record");
         initial_importance = system.get_memory(&memory_id).unwrap().importance();
 
         // Boost importance multiple times to ensure detectable change
         for _ in 0..5 {
             system
-                .reinforce_retrieval(&[memory_id.clone()], RetrievalOutcome::Helpful)
+                .reinforce_recall(&[memory_id.clone()], RetrievalOutcome::Helpful)
                 .expect("Failed");
         }
         boosted_importance = system.get_memory(&memory_id).unwrap().importance();
@@ -403,7 +403,7 @@ fn test_brutal_exceed_working_memory() {
             &format!("Overflow memory {} with lots of content to push limits", i),
             vec!["overflow"],
         );
-        let id = system.record(exp, None).expect("Failed to record");
+        let id = system.remember(exp, None).expect("Failed to record");
         all_ids.push(id);
     }
 
@@ -430,7 +430,7 @@ fn test_brutal_large_content() {
     };
 
     let id = system
-        .record(exp, None)
+        .remember(exp, None)
         .expect("Should handle large content");
 
     // Retrieve and verify
@@ -459,7 +459,7 @@ fn test_brutal_many_entities() {
     };
 
     let id = system
-        .record(exp, None)
+        .remember(exp, None)
         .expect("Should handle many entities");
 
     let memory = system.get_memory(&id).expect("Should retrieve");
@@ -480,14 +480,14 @@ fn test_brutal_importance_boundary_cycling() {
     let (system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Boundary test", vec!["boundary"]);
-    let id = system.record(exp, None).expect("Failed");
+    let id = system.remember(exp, None).expect("Failed");
 
     // Cycle importance to max and back multiple times
     for cycle in 0..10 {
         // Boost to max
         for _ in 0..50 {
             system
-                .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Helpful)
+                .reinforce_recall(&[id.clone()], RetrievalOutcome::Helpful)
                 .expect("Failed");
         }
         let high = system.get_memory(&id).expect("Failed").importance();
@@ -501,7 +501,7 @@ fn test_brutal_importance_boundary_cycling() {
         // Decay to min
         for _ in 0..100 {
             system
-                .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Misleading)
+                .reinforce_recall(&[id.clone()], RetrievalOutcome::Misleading)
                 .expect("Failed");
         }
         let low = system.get_memory(&id).expect("Failed").importance();
@@ -520,12 +520,12 @@ fn test_brutal_importance_bounds_invariant() {
     let (system, _temp_dir) = create_test_system();
 
     let exp = create_experience("Bounds invariant test", vec!["bounds"]);
-    let id = system.record(exp, None).expect("Failed");
+    let id = system.remember(exp, None).expect("Failed");
 
     // Extreme boosts
     for _ in 0..1000 {
         system
-            .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Helpful)
+            .reinforce_recall(&[id.clone()], RetrievalOutcome::Helpful)
             .expect("Failed");
     }
     let importance = system.get_memory(&id).expect("Failed").importance();
@@ -543,7 +543,7 @@ fn test_brutal_importance_bounds_invariant() {
     // Extreme decays
     for _ in 0..1000 {
         system
-            .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Misleading)
+            .reinforce_recall(&[id.clone()], RetrievalOutcome::Misleading)
             .expect("Failed");
     }
     let importance = system.get_memory(&id).expect("Failed").importance();
@@ -572,7 +572,7 @@ fn test_brutal_no_id_collisions() {
 
     for i in 0..500 {
         let exp = create_experience(&format!("Collision test {}", i), vec!["collision"]);
-        let id = system.record(exp, None).expect("Failed to record");
+        let id = system.remember(exp, None).expect("Failed to record");
 
         // Verify no collision
         assert!(
@@ -597,13 +597,13 @@ fn test_brutal_dense_graph() {
     let mut ids = Vec::new();
     for i in 0..50 {
         let exp = create_experience(&format!("Graph node {}", i), vec!["graph"]);
-        ids.push(system.record(exp, None).expect("Failed"));
+        ids.push(system.remember(exp, None).expect("Failed"));
     }
 
     // Create full mesh - every pair of memories associated
     // This creates 50*49/2 = 1225 edges
     system
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .expect("Failed");
 
     let stats = system.graph_stats();
@@ -627,12 +627,12 @@ fn test_brutal_graph_maintenance_cycles() {
     let mut ids = Vec::new();
     for i in 0..20 {
         let exp = create_experience(&format!("Maintenance test {}", i), vec!["maint"]);
-        ids.push(system.record(exp, None).expect("Failed"));
+        ids.push(system.remember(exp, None).expect("Failed"));
     }
 
     // Build associations
     system
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .expect("Failed");
 
     // Run maintenance many times - should not crash or corrupt
@@ -662,7 +662,7 @@ fn test_brutal_timing_record() {
     let start = Instant::now();
     for i in 0..100 {
         let exp = create_experience(&format!("Timing test {}", i), vec!["timing"]);
-        system.record(exp, None).expect("Failed");
+        system.remember(exp, None).expect("Failed");
     }
     let elapsed = start.elapsed();
 
@@ -685,7 +685,7 @@ fn test_brutal_timing_retrieval() {
     // Populate
     for i in 0..100 {
         let exp = create_experience(&format!("Retrieval timing {}", i), vec!["retrieve"]);
-        system.record(exp, None).expect("Failed");
+        system.remember(exp, None).expect("Failed");
     }
 
     let start = Instant::now();
@@ -695,7 +695,7 @@ fn test_brutal_timing_retrieval() {
             max_results: 10,
             ..Default::default()
         };
-        system.retrieve(&query).expect("Failed");
+        system.recall(&query).expect("Failed");
     }
     let elapsed = start.elapsed();
 
@@ -723,7 +723,7 @@ fn test_brutal_empty_queries() {
         ..Default::default()
     };
     // Should not panic, might return empty or error
-    let _ = system.retrieve(&query);
+    let _ = system.recall(&query);
 
     // No query text at all
     let query = Query {
@@ -731,7 +731,7 @@ fn test_brutal_empty_queries() {
         max_results: 10,
         ..Default::default()
     };
-    let _ = system.retrieve(&query);
+    let _ = system.recall(&query);
 }
 
 /// Unicode and special characters
@@ -747,7 +747,7 @@ fn test_brutal_unicode_content() {
         ..Default::default()
     };
 
-    let id = system.record(exp, None).expect("Should handle unicode");
+    let id = system.remember(exp, None).expect("Should handle unicode");
     let memory = system.get_memory(&id).expect("Should retrieve unicode");
     assert_eq!(
         memory.experience.content, unicode_content,
@@ -763,7 +763,7 @@ fn test_brutal_special_characters() {
     let special = "Special:\t\n\r content";
     let exp = create_experience(special, vec!["special"]);
     let id = system
-        .record(exp, None)
+        .remember(exp, None)
         .expect("Should handle special chars");
     let memory = system.get_memory(&id).expect("Should retrieve");
     assert!(
@@ -785,7 +785,9 @@ fn test_brutal_long_entity_names() {
         ..Default::default()
     };
 
-    let id = system.record(exp, None).expect("Should handle long entity");
+    let id = system
+        .remember(exp, None)
+        .expect("Should handle long entity");
     let memory = system.get_memory(&id).expect("Should retrieve");
     assert_eq!(
         memory.experience.entities[0].len(),
@@ -812,7 +814,7 @@ fn test_brutal_data_integrity() {
         for i in 0..50 {
             let content = format!("Integrity test {} - unique content {}", i, Uuid::new_v4());
             let exp = create_experience(&content, vec!["integrity"]);
-            let id = system.record(exp, None).expect("Failed");
+            let id = system.remember(exp, None).expect("Failed");
             expected_contents.push((id, content));
         }
     }
@@ -843,7 +845,7 @@ fn test_brutal_reader_parallelism() {
     let mut ids = Vec::new();
     for i in 0..100 {
         let exp = create_experience(&format!("Reader parallelism test {}", i), vec!["parallel"]);
-        ids.push(system.record(exp, None).expect("Failed to record"));
+        ids.push(system.remember(exp, None).expect("Failed to record"));
     }
 
     let system = Arc::new(system); // No external lock - internally thread-safe
@@ -915,7 +917,7 @@ fn test_brutal_no_deadlock_mixed_operations() {
                         &format!("Deadlock test thread {} op {}", thread_id, i),
                         vec!["deadlock"],
                     );
-                    if let Ok(id) = sys.record(exp, None) {
+                    if let Ok(id) = sys.remember(exp, None) {
                         recorded_ids.push(id);
                     }
                 } else {
@@ -929,7 +931,7 @@ fn test_brutal_no_deadlock_mixed_operations() {
                             max_results: 5,
                             ..Default::default()
                         };
-                        let _ = sys.retrieve(&query);
+                        let _ = sys.recall(&query);
                     }
                 }
                 ops.fetch_add(1, Ordering::Relaxed);
@@ -973,7 +975,7 @@ fn test_brutal_lock_order_safety() {
     let mut ids = Vec::new();
     for i in 0..20 {
         let exp = create_experience(&format!("Lock order test {}", i), vec!["lock"]);
-        ids.push(system.record(exp, None).expect("Failed"));
+        ids.push(system.remember(exp, None).expect("Failed"));
     }
     drop(system);
 
@@ -994,7 +996,7 @@ fn test_brutal_lock_order_safety() {
             max_results: 10,
             ..Default::default()
         };
-        let _ = system.retrieve(&query);
+        let _ = system.recall(&query);
     }
 }
 
@@ -1020,7 +1022,7 @@ fn test_brutal_cache_eviction_integrity() {
     for i in 0..100 {
         let content = format!("Cache eviction test {} - {}", i, Uuid::new_v4());
         let exp = create_experience(&content, vec!["eviction"]);
-        let id = system.record(exp, None).expect("Failed");
+        let id = system.remember(exp, None).expect("Failed");
         all_ids.push(id);
         expected_contents.push(content);
     }
@@ -1048,7 +1050,7 @@ fn test_brutal_reinforcement_race() {
 
     // Create test memory
     let exp = create_experience("Reinforcement race test", vec!["race"]);
-    let memory_id = system.record(exp, None).expect("Failed");
+    let memory_id = system.remember(exp, None).expect("Failed");
 
     let system = Arc::new(system); // No external lock - internally thread-safe
     let num_threads = 8;
@@ -1072,7 +1074,7 @@ fn test_brutal_reinforcement_race() {
                     d.fetch_add(1, Ordering::Relaxed);
                     RetrievalOutcome::Misleading
                 };
-                let _ = sys.reinforce_retrieval(&[id.clone()], outcome);
+                let _ = sys.reinforce_recall(&[id.clone()], outcome);
             }
         });
         handles.push(handle);
@@ -1109,11 +1111,11 @@ fn test_brutal_storage_isolation() {
 
     // Write to system1
     let exp1 = create_experience("System 1 only data", vec!["isolated"]);
-    let id1 = system1.record(exp1, None).expect("Failed");
+    let id1 = system1.remember(exp1, None).expect("Failed");
 
     // Write to system2
     let exp2 = create_experience("System 2 only data", vec!["isolated"]);
-    let id2 = system2.record(exp2, None).expect("Failed");
+    let id2 = system2.remember(exp2, None).expect("Failed");
 
     // Verify isolation - system1 shouldn't see system2's data
     assert!(
@@ -1176,7 +1178,7 @@ fn test_brutal_full_pipeline_stress() {
                 // Step 1: Record
                 let content = format!("Pipeline stress thread {} cycle {}", thread_id, cycle);
                 let exp = create_experience(&content, vec!["pipeline"]);
-                let memory_id = sys.record(exp, None).expect("Record failed");
+                let memory_id = sys.remember(exp, None).expect("Record failed");
 
                 // Step 2: Retrieve (verify findable)
                 let query = Query {
@@ -1184,13 +1186,13 @@ fn test_brutal_full_pipeline_stress() {
                     max_results: 10,
                     ..Default::default()
                 };
-                let _ = sys.retrieve(&query);
+                let _ = sys.recall(&query);
 
                 // Step 3: Direct get
                 sys.get_memory(&memory_id).expect("Direct get failed");
 
                 // Step 4: Reinforce
-                sys.reinforce_retrieval(&[memory_id], RetrievalOutcome::Helpful)
+                sys.reinforce_recall(&[memory_id], RetrievalOutcome::Helpful)
                     .expect("Reinforce failed");
 
                 success.fetch_add(1, Ordering::Relaxed);
@@ -1221,7 +1223,7 @@ fn test_brutal_graph_consistency() {
     let mut memory_ids = Vec::new();
     for i in 0..30 {
         let exp = create_experience(&format!("Graph consistency {}", i), vec!["graph"]);
-        memory_ids.push(system.record(exp, None).expect("Failed"));
+        memory_ids.push(system.remember(exp, None).expect("Failed"));
     }
 
     let system = Arc::new(system); // No external lock - internally thread-safe
@@ -1241,7 +1243,7 @@ fn test_brutal_graph_consistency() {
                 let idx2 = rand::random::<usize>() % ids_clone.len();
                 if idx1 != idx2 {
                     // Create association via reinforce
-                    let _ = sys.reinforce_retrieval(
+                    let _ = sys.reinforce_recall(
                         &[ids_clone[idx1].clone(), ids_clone[idx2].clone()],
                         RetrievalOutcome::Helpful,
                     );
@@ -1269,14 +1271,14 @@ fn test_brutal_lifecycle_churn() {
     // Create batch
     for i in 0..50 {
         let exp = create_experience(&format!("Lifecycle churn {}", i), vec!["lifecycle"]);
-        ids.push(system.record(exp, None).expect("Failed"));
+        ids.push(system.remember(exp, None).expect("Failed"));
     }
 
     // Simulate "deletion" by decaying importance to minimum
     for _ in 0..100 {
         for id in &ids {
             system
-                .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Misleading)
+                .reinforce_recall(&[id.clone()], RetrievalOutcome::Misleading)
                 .expect("Decay failed");
         }
     }

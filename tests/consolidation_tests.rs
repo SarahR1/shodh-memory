@@ -361,7 +361,7 @@ fn test_importance_affects_retention() {
 
     // Record high importance memory
     let high_id = system
-        .record(
+        .remember(
             Experience {
                 content: "Very important observation".to_string(),
                 experience_type: ExperienceType::Decision, // Decisions get higher importance
@@ -373,7 +373,7 @@ fn test_importance_affects_retention() {
 
     // Record low importance memory
     let low_id = system
-        .record(
+        .remember(
             Experience {
                 content: "Random observation".to_string(),
                 experience_type: ExperienceType::Observation,
@@ -399,7 +399,7 @@ fn test_working_memory_capacity() {
     // Record more memories than working memory capacity
     for i in 0..20 {
         system
-            .record(create_experience(&format!("Memory {}", i)), None)
+            .remember(create_experience(&format!("Memory {}", i)), None)
             .unwrap();
     }
 
@@ -415,7 +415,7 @@ fn test_session_memory_used() {
     // Fill up working memory
     for i in 0..15 {
         system
-            .record(create_experience(&format!("Overflow memory {}", i)), None)
+            .remember(create_experience(&format!("Overflow memory {}", i)), None)
             .unwrap();
     }
 
@@ -431,7 +431,7 @@ fn test_graph_maintenance_succeeds() {
     // Record some memories
     for i in 0..5 {
         system
-            .record(create_experience(&format!("To consolidate {}", i)), None)
+            .remember(create_experience(&format!("To consolidate {}", i)), None)
             .unwrap();
     }
 
@@ -548,7 +548,7 @@ fn test_many_memories_graph_maintenance() {
     // Create many memories
     for i in 0..50 {
         system
-            .record(create_experience(&format!("Bulk memory {}", i)), None)
+            .remember(create_experience(&format!("Bulk memory {}", i)), None)
             .unwrap();
     }
 
@@ -570,7 +570,7 @@ fn test_multiple_graph_maintenance_calls() {
 
     for i in 0..10 {
         system
-            .record(create_experience(&format!("Memory {}", i)), None)
+            .remember(create_experience(&format!("Memory {}", i)), None)
             .unwrap();
     }
 
@@ -820,7 +820,7 @@ fn test_stats_report_accurate() {
 
     for i in 0..10 {
         system
-            .record(create_experience(&format!("Stats test {}", i)), None)
+            .remember(create_experience(&format!("Stats test {}", i)), None)
             .unwrap();
     }
 
@@ -903,10 +903,10 @@ fn test_consolidation_report_after_retrieval() {
 
     // Record some memories
     let _id1 = system
-        .record(create_experience("Paris is the capital of France"), None)
+        .remember(create_experience("Paris is the capital of France"), None)
         .unwrap();
     let _id2 = system
-        .record(create_experience("The Eiffel Tower is in Paris"), None)
+        .remember(create_experience("The Eiffel Tower is in Paris"), None)
         .unwrap();
 
     // Retrieve memories multiple times to trigger strengthening
@@ -916,7 +916,7 @@ fn test_consolidation_report_after_retrieval() {
             query_text: Some("Paris".to_string()),
             ..Default::default()
         };
-        let _ = system.retrieve(&query);
+        let _ = system.recall(&query);
     }
 
     // Get report (epoch = all time)
@@ -938,7 +938,7 @@ fn test_consolidation_report_after_maintenance() {
     // Record memories
     for i in 0..10 {
         system
-            .record(create_experience(&format!("Test memory {}", i)), None)
+            .remember(create_experience(&format!("Test memory {}", i)), None)
             .unwrap();
     }
 
@@ -961,16 +961,16 @@ fn test_consolidation_report_hebbian_learning() {
 
     // Record memories with related content
     let _id1 = system
-        .record(
+        .remember(
             create_experience("Rust is a systems programming language"),
             None,
         )
         .unwrap();
     let _id2 = system
-        .record(create_experience("Rust has ownership and borrowing"), None)
+        .remember(create_experience("Rust has ownership and borrowing"), None)
         .unwrap();
     let _id3 = system
-        .record(create_experience("Rust prevents memory leaks"), None)
+        .remember(create_experience("Rust prevents memory leaks"), None)
         .unwrap();
 
     // Retrieve related memories together multiple times
@@ -981,7 +981,7 @@ fn test_consolidation_report_hebbian_learning() {
             max_results: 3,
             ..Default::default()
         };
-        let _ = system.retrieve(&query);
+        let _ = system.recall(&query);
     }
 
     // Get report
@@ -1001,7 +1001,7 @@ fn test_consolidation_report_time_filtering() {
 
     // Record and retrieve memories
     let _id1 = system
-        .record(create_experience("Time-filtered test memory"), None)
+        .remember(create_experience("Time-filtered test memory"), None)
         .unwrap();
 
     for _ in 0..7 {
@@ -1009,7 +1009,7 @@ fn test_consolidation_report_time_filtering() {
             query_text: Some("Time-filtered".to_string()),
             ..Default::default()
         };
-        let _ = system.retrieve(&query);
+        let _ = system.recall(&query);
     }
 
     // Get reports for different time periods
@@ -1040,14 +1040,14 @@ fn test_consolidation_event_buffer_clear() {
 
     // Generate some events
     system
-        .record(create_experience("Buffer clear test"), None)
+        .remember(create_experience("Buffer clear test"), None)
         .unwrap();
     let query = Query {
         query_text: Some("Buffer".to_string()),
         ..Default::default()
     };
     for _ in 0..7 {
-        let _ = system.retrieve(&query);
+        let _ = system.recall(&query);
     }
 
     // Count events before clear
@@ -1076,7 +1076,7 @@ fn test_consolidation_report_stats_consistency() {
     // Record and interact with memories
     for i in 0..5 {
         system
-            .record(
+            .remember(
                 create_experience(&format!("Stats consistency test {}", i)),
                 None,
             )
@@ -1090,7 +1090,7 @@ fn test_consolidation_report_stats_consistency() {
             max_results: 5,
             ..Default::default()
         };
-        let _ = system.retrieve(&query);
+        let _ = system.recall(&query);
     }
 
     // Run maintenance with standard decay factor
@@ -1129,7 +1129,7 @@ fn test_memory_strengthening_records_before_after() {
 
     // Record a memory with moderate initial importance
     let _id = system
-        .record(
+        .remember(
             Experience {
                 content: "Strengthening before/after test".to_string(),
                 experience_type: ExperienceType::Observation,
@@ -1145,7 +1145,7 @@ fn test_memory_strengthening_records_before_after() {
             query_text: Some("before/after test".to_string()),
             ..Default::default()
         };
-        let _ = system.retrieve(&query);
+        let _ = system.recall(&query);
     }
 
     // Get report
@@ -1168,10 +1168,10 @@ fn test_edge_events_have_strength_values() {
 
     // Record related memories
     let _id1 = system
-        .record(create_experience("Edge test: topic A related"), None)
+        .remember(create_experience("Edge test: topic A related"), None)
         .unwrap();
     let _id2 = system
-        .record(create_experience("Edge test: topic A connected"), None)
+        .remember(create_experience("Edge test: topic A connected"), None)
         .unwrap();
 
     // Retrieve together to form edges
@@ -1181,7 +1181,7 @@ fn test_edge_events_have_strength_values() {
             max_results: 2,
             ..Default::default()
         };
-        let _ = system.retrieve(&query);
+        let _ = system.recall(&query);
     }
 
     // Get report
@@ -1215,7 +1215,7 @@ fn test_consolidation_events_list() {
 
     // Record and retrieve a memory
     system
-        .record(create_experience("Test consolidation events list"), None)
+        .remember(create_experience("Test consolidation events list"), None)
         .unwrap();
 
     for _ in 0..7 {
@@ -1223,7 +1223,7 @@ fn test_consolidation_events_list() {
             query_text: Some("consolidation events".to_string()),
             ..Default::default()
         };
-        let _ = system.retrieve(&query);
+        let _ = system.recall(&query);
     }
 
     // Get all events directly
@@ -1253,7 +1253,7 @@ fn test_consolidation_events_since_filter() {
 
     // Record a memory and generate some events
     system
-        .record(create_experience("Test events since filter"), None)
+        .remember(create_experience("Test events since filter"), None)
         .unwrap();
 
     let start_time = Utc::now();
@@ -1263,7 +1263,7 @@ fn test_consolidation_events_since_filter() {
             query_text: Some("events since".to_string()),
             ..Default::default()
         };
-        let _ = system.retrieve(&query);
+        let _ = system.recall(&query);
     }
 
     // Get events since the start time
@@ -1288,7 +1288,7 @@ fn test_consolidation_event_count() {
 
     // Record a memory and do some retrievals
     system
-        .record(create_experience("Test event count"), None)
+        .remember(create_experience("Test event count"), None)
         .unwrap();
 
     for _ in 0..7 {
@@ -1296,7 +1296,7 @@ fn test_consolidation_event_count() {
             query_text: Some("event count".to_string()),
             ..Default::default()
         };
-        let _ = system.retrieve(&query);
+        let _ = system.recall(&query);
     }
 
     // Should have more events now

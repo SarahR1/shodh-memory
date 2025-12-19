@@ -1931,7 +1931,7 @@ async fn record_experience(
 
         tokio::task::spawn_blocking(move || {
             let memory_guard = memory.read();
-            memory_guard.record(experience, None)
+            memory_guard.remember(experience, None)
         })
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
@@ -2154,7 +2154,7 @@ async fn remember(
         let created_at = req.created_at;
         tokio::task::spawn_blocking(move || {
             let memory_guard = memory.read();
-            memory_guard.record(exp_clone, created_at)
+            memory_guard.remember(exp_clone, created_at)
         })
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
@@ -3148,7 +3148,7 @@ async fn recall(
                     max_results: limit,
                     ..Default::default()
                 };
-                memory_guard.retrieve(&query).unwrap_or_default()
+                memory_guard.recall(&query).unwrap_or_default()
             })
             .await
             .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
@@ -3227,7 +3227,7 @@ async fn recall(
                 max_results: limit * VECTOR_SEARCH_CANDIDATE_MULTIPLIER,
                 ..Default::default()
             };
-            memory_guard.retrieve(&query).unwrap_or_default()
+            memory_guard.recall(&query).unwrap_or_default()
         })
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
@@ -4090,7 +4090,7 @@ async fn recall_tracked(
                 max_results: limit,
                 ..Default::default()
             };
-            memory_guard.retrieve(&query).unwrap_or_default()
+            memory_guard.recall(&query).unwrap_or_default()
         })
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
@@ -4204,7 +4204,7 @@ async fn reinforce_feedback(
         let memory = memory.clone();
         tokio::task::spawn_blocking(move || {
             let memory_guard = memory.read();
-            memory_guard.reinforce_retrieval(&memory_ids, outcome)
+            memory_guard.reinforce_recall(&memory_ids, outcome)
         })
         .await
         .map_err(|e| AppError::Internal(anyhow::anyhow!("Blocking task panicked: {e}")))?
@@ -4522,7 +4522,7 @@ async fn batch_remember(
             let mut errors: Vec<BatchErrorItem> = Vec::new();
 
             for (index, experience, created_at) in experiences {
-                match memory_guard.record(experience.clone(), created_at) {
+                match memory_guard.remember(experience.clone(), created_at) {
                     Ok(id) => {
                         results.push((index, id.0.to_string(), experience));
                     }
@@ -4657,7 +4657,7 @@ async fn get_memory(
         ..Default::default()
     };
 
-    let all_memories = memory_guard.retrieve(&query).map_err(AppError::Internal)?;
+    let all_memories = memory_guard.recall(&query).map_err(AppError::Internal)?;
 
     let shared_memory = all_memories
         .into_iter()
@@ -4717,7 +4717,7 @@ async fn update_memory(
         ..Default::default()
     };
 
-    let all_memories = memory_guard.retrieve(&query).map_err(AppError::Internal)?;
+    let all_memories = memory_guard.recall(&query).map_err(AppError::Internal)?;
 
     let shared_memory = all_memories
         .into_iter()
@@ -4740,7 +4740,7 @@ async fn update_memory(
     // Re-record (will update in storage)
     let experience = current_memory.experience.clone();
     memory_guard
-        .record(experience, None) // None preserves original created_at behavior for updates
+        .remember(experience, None) // None preserves original created_at behavior for updates
         .map_err(AppError::Internal)?;
 
     // Enterprise audit logging
@@ -4883,7 +4883,7 @@ async fn get_all_memories(
         ..Default::default()
     };
 
-    let shared_memories = memory_guard.retrieve(&query).map_err(AppError::Internal)?;
+    let shared_memories = memory_guard.recall(&query).map_err(AppError::Internal)?;
 
     // Convert Arc<Memory> to owned Memory for response
     let memories: Vec<Memory> = shared_memories.iter().map(|m| (**m).clone()).collect();
@@ -5713,7 +5713,7 @@ async fn patch_memory(
         ..Default::default()
     };
 
-    let all_memories = memory_guard.retrieve(&query).map_err(AppError::Internal)?;
+    let all_memories = memory_guard.recall(&query).map_err(AppError::Internal)?;
 
     let shared_memory = all_memories
         .into_iter()
@@ -5780,7 +5780,7 @@ async fn patch_memory(
     // Re-record (will update in storage and re-index)
     let experience = current_memory.experience.clone();
     memory_guard
-        .record(experience, None) // None preserves original created_at behavior for patches
+        .remember(experience, None) // None preserves original created_at behavior for patches
         .map_err(AppError::Internal)?;
 
     state.log_event(
@@ -6063,7 +6063,7 @@ async fn multimodal_search(
         ..Default::default()
     };
 
-    let shared_memories = memory_guard.retrieve(&query).map_err(AppError::Internal)?;
+    let shared_memories = memory_guard.recall(&query).map_err(AppError::Internal)?;
 
     // Convert Arc<Memory> to owned Memory for response
     let memories: Vec<Memory> = shared_memories.iter().map(|m| (**m).clone()).collect();
@@ -6182,7 +6182,7 @@ async fn robotics_search(
         ..Default::default()
     };
 
-    let shared_memories = memory_guard.retrieve(&query).map_err(AppError::Internal)?;
+    let shared_memories = memory_guard.recall(&query).map_err(AppError::Internal)?;
 
     let memories: Vec<Memory> = shared_memories.iter().map(|m| (**m).clone()).collect();
 

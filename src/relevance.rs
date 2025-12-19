@@ -656,8 +656,8 @@ impl RelevanceEngine {
 
         let mut results: Vec<(Memory, f32)> = Vec::new();
 
-        // Use memory system's semantic retrieval (uses vector index)
-        match memory_system.retrieve(&query) {
+        // Use memory system's semantic recall (uses vector index)
+        match memory_system.recall(&query) {
             Ok(shared_memories) => {
                 // Results are ordered by vector similarity (closest first).
                 // Use reciprocal rank scoring: score = 1/(rank+1)

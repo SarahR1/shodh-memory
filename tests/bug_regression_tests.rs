@@ -90,7 +90,7 @@ fn test_bug001_multiple_memories_same_day_all_retrievable() {
             entities: vec![format!("entity_{}", i)],
             ..Default::default()
         };
-        let id = system.record(exp, None).expect("Failed to record memory");
+        let id = system.remember(exp, None).expect("Failed to record memory");
         memory_ids.push(id);
     }
 
@@ -110,7 +110,7 @@ fn test_bug001_multiple_memories_same_day_all_retrievable() {
             max_results: 5,
             ..Default::default()
         };
-        let results = system.retrieve(&query).expect("Failed to retrieve");
+        let results = system.recall(&query).expect("Failed to retrieve");
         assert!(
             !results.is_empty(),
             "BUG-001 REGRESSION: Memory {} not found. Date index overwrite!",
@@ -128,7 +128,7 @@ fn test_bug001_date_search_returns_all_memories() {
     // Record 5 memories
     for i in 0..5 {
         let exp = create_experience(&format!("Date search test memory {}", i));
-        system.record(exp, None).expect("Failed to record");
+        system.remember(exp, None).expect("Failed to record");
     }
 
     // Search by date range (today)
@@ -139,7 +139,7 @@ fn test_bug001_date_search_returns_all_memories() {
         ..Default::default()
     };
 
-    let results = system.retrieve(&query).expect("Failed to retrieve");
+    let results = system.recall(&query).expect("Failed to retrieve");
     assert!(
         results.len() >= 5,
         "BUG-001 REGRESSION: Date search returned {} memories, expected >= 5",
@@ -229,7 +229,7 @@ fn test_bug005_index_removal_is_fast() {
     // Record 100 memories to populate indices
     for i in 0..100 {
         let exp = create_experience(&format!("Index removal test memory {}", i));
-        system.record(exp, None).expect("Failed to record");
+        system.remember(exp, None).expect("Failed to record");
     }
 
     // Now measure time to flush (which triggers index cleanup)
@@ -271,7 +271,7 @@ fn test_bug007_combined_search_scales_linearly() {
             robot_id: Some(format!("robot_{}", i % 10)),
             ..Default::default()
         };
-        system.record(exp, None).expect("Failed to record");
+        system.remember(exp, None).expect("Failed to record");
     }
 
     // Run combined search with multiple criteria (semantic + robot_id filter)
@@ -283,7 +283,7 @@ fn test_bug007_combined_search_scales_linearly() {
         ..Default::default()
     };
 
-    let results = system.retrieve(&query).expect("Failed to retrieve");
+    let results = system.recall(&query).expect("Failed to retrieve");
     let duration = start.elapsed();
 
     // Combined search should complete in < 500ms for 50 memories
@@ -466,7 +466,7 @@ fn test_algo004_importance_index_updates_after_change() {
         entities: vec!["neural_networks".to_string()],
         ..Default::default()
     };
-    let memory_id = system.record(exp, None).expect("Failed to record");
+    let memory_id = system.remember(exp, None).expect("Failed to record");
 
     // Retrieve it initially
     let query = Query {
@@ -474,23 +474,23 @@ fn test_algo004_importance_index_updates_after_change() {
         max_results: 5,
         ..Default::default()
     };
-    let initial_results = system.retrieve(&query).expect("Failed to retrieve");
+    let initial_results = system.recall(&query).expect("Failed to retrieve");
     assert!(
         !initial_results.is_empty(),
         "Memory should be retrievable initially"
     );
 
     // Simulate Hebbian reinforcement by retrieving with positive outcome
-    // (In real usage, this would be done via reinforce_retrieval)
+    // (In real usage, this would be done via reinforce_recall)
     let memory_ids = vec![memory_id.clone()];
     let outcome = shodh_memory::memory::RetrievalOutcome::Helpful;
     system
-        .reinforce_retrieval(&memory_ids, outcome)
+        .reinforce_recall(&memory_ids, outcome)
         .expect("Failed to reinforce");
 
     // Retrieve again - should still find the memory
     let after_results = system
-        .retrieve(&query)
+        .recall(&query)
         .expect("Failed to retrieve after reinforce");
     assert!(
         !after_results.is_empty(),
@@ -525,7 +525,7 @@ fn test_bug006_empty_query_returns_gracefully() {
     // Record some memories
     for i in 0..5 {
         let exp = create_experience(&format!("Test memory {}", i));
-        system.record(exp, None).expect("Failed to record");
+        system.remember(exp, None).expect("Failed to record");
     }
 
     // Empty query should not crash, should return gracefully
@@ -535,7 +535,7 @@ fn test_bug006_empty_query_returns_gracefully() {
         ..Default::default()
     };
 
-    let results = system.retrieve(&query);
+    let results = system.recall(&query);
     assert!(
         results.is_ok(),
         "BUG-006: Empty query should not crash: {:?}",
@@ -574,7 +574,7 @@ fn test_bug004_vamana_maintains_recall_after_inserts() {
             entities: vec![topic.to_string()],
             ..Default::default()
         };
-        system.record(exp, None).expect("Failed to record");
+        system.remember(exp, None).expect("Failed to record");
     }
 
     // Query should find relevant results
@@ -584,7 +584,7 @@ fn test_bug004_vamana_maintains_recall_after_inserts() {
         ..Default::default()
     };
 
-    let results = system.retrieve(&query).expect("Failed to retrieve");
+    let results = system.recall(&query).expect("Failed to retrieve");
 
     assert!(
         results.len() >= 3,
@@ -643,7 +643,7 @@ fn test_geo_filter_retrieval() {
 
     for (name, lat, lon) in locations {
         let exp = create_geo_experience(&format!("Location test: {}", name), lat, lon);
-        system.record(exp, None).expect("Failed to record");
+        system.remember(exp, None).expect("Failed to record");
     }
 
     // Query within 1km of SF downtown - should get SF memories
@@ -654,7 +654,7 @@ fn test_geo_filter_retrieval() {
         ..Default::default()
     };
 
-    let results = system.retrieve(&query).expect("Failed to retrieve");
+    let results = system.recall(&query).expect("Failed to retrieve");
 
     // Should find SF downtown and nearby, but not Oakland or LA
     assert!(
@@ -684,7 +684,7 @@ fn test_sho48_forget_removes_from_semantic_search() {
         entities: vec!["quantum".to_string(), "photonic".to_string()],
         ..Default::default()
     };
-    let memory_id = system.record(exp, None).expect("Failed to record memory");
+    let memory_id = system.remember(exp, None).expect("Failed to record memory");
 
     // Verify it's findable via semantic search
     let query = Query {
@@ -692,7 +692,7 @@ fn test_sho48_forget_removes_from_semantic_search() {
         max_results: 10,
         ..Default::default()
     };
-    let results_before = system.retrieve(&query).expect("Failed to retrieve");
+    let results_before = system.recall(&query).expect("Failed to retrieve");
     assert!(
         !results_before.is_empty(),
         "Memory should be findable before forget"
@@ -707,7 +707,7 @@ fn test_sho48_forget_removes_from_semantic_search() {
     assert_eq!(forget_result, 1, "Should have forgotten 1 memory");
 
     // Verify it's NO LONGER findable via semantic search
-    let results_after = system.retrieve(&query).expect("Failed to retrieve");
+    let results_after = system.recall(&query).expect("Failed to retrieve");
     let found_deleted = results_after.iter().any(|m| m.id == memory_id);
     assert!(
         !found_deleted,
@@ -724,7 +724,7 @@ fn test_sho48_forget_updates_stats() {
 
     // Record a memory
     let exp = create_experience("Stats tracking test memory for SHO-48");
-    let memory_id = system.record(exp, None).expect("Failed to record memory");
+    let memory_id = system.remember(exp, None).expect("Failed to record memory");
 
     let stats_before = system.stats();
 
@@ -771,7 +771,7 @@ fn test_sho49_no_duplicates_in_retrieve() {
             entities: vec!["dedup_test".to_string()],
             ..Default::default()
         };
-        let id = system.record(exp, None).expect("Failed to record");
+        let id = system.remember(exp, None).expect("Failed to record");
         recorded_ids.insert(id);
     }
 
@@ -780,7 +780,7 @@ fn test_sho49_no_duplicates_in_retrieve() {
         max_results: 100,
         ..Default::default()
     };
-    let results = system.retrieve(&query).expect("Failed to retrieve");
+    let results = system.recall(&query).expect("Failed to retrieve");
 
     // Check for duplicates
     let mut seen_ids = std::collections::HashSet::new();
@@ -804,7 +804,7 @@ fn test_sho49_retrieve_count_matches_unique() {
     // Record 5 unique memories
     for i in 0..5 {
         let exp = create_experience(&format!("Unique memory {} for count test", i));
-        system.record(exp, None).expect("Failed to record");
+        system.remember(exp, None).expect("Failed to record");
     }
 
     // Retrieve all
@@ -812,7 +812,7 @@ fn test_sho49_retrieve_count_matches_unique() {
         max_results: 100,
         ..Default::default()
     };
-    let results = system.retrieve(&query).expect("Failed to retrieve");
+    let results = system.recall(&query).expect("Failed to retrieve");
 
     // Count unique IDs
     let unique_count = results
@@ -846,7 +846,7 @@ fn test_sho50_stats_updated_on_add() {
 
     // Record a memory
     let exp = create_experience("Stats test memory for SHO-50");
-    system.record(exp, None).expect("Failed to record");
+    system.remember(exp, None).expect("Failed to record");
 
     let stats_after = system.stats();
 
@@ -884,7 +884,7 @@ fn test_sho50_stats_updated_on_forget() {
 
     // Record a memory
     let exp = create_experience("Memory to forget for SHO-50 stats test");
-    let memory_id = system.record(exp, None).expect("Failed to record");
+    let memory_id = system.remember(exp, None).expect("Failed to record");
 
     let stats_before = system.stats();
 
@@ -930,7 +930,7 @@ fn test_sho50_high_importance_updates_session_count() {
         entities: vec!["architecture".to_string()],
         ..Default::default()
     };
-    system.record(exp, None).expect("Failed to record");
+    system.remember(exp, None).expect("Failed to record");
 
     let stats_after = system.stats();
 

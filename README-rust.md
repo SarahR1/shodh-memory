@@ -22,35 +22,41 @@ On first use, models (~37MB) download automatically to `~/.cache/shodh-memory/`.
 ## Quick Start
 
 ```rust
-use shodh_memory::{MemorySystem, MemoryConfig, MemoryType};
+use shodh_memory::memory::{
+    MemorySystem, MemoryConfig, Experience, ExperienceType, Query, ForgetCriteria
+};
 use anyhow::Result;
 
 fn main() -> Result<()> {
-    // Create memory system
-    let config = MemoryConfig::default()
-        .with_storage_path("./my_agent_data");
+    // Create memory system with default config
+    let config = MemoryConfig {
+        storage_path: "./my_agent_data".into(),
+        ..Default::default()
+    };
     let memory = MemorySystem::new(config)?;
 
-    // Store memories
-    memory.remember(
-        "user-1",
-        "User prefers dark mode",
-        MemoryType::Decision,
-        vec!["preferences".to_string()],
-    )?;
-
-    memory.remember(
-        "user-1",
-        "JWT tokens expire after 24h",
-        MemoryType::Learning,
-        vec!["auth".to_string()],
-    )?;
+    // Store a memory
+    let experience = Experience {
+        content: "User prefers dark mode for all applications".to_string(),
+        experience_type: ExperienceType::Decision,
+        ..Default::default()
+    };
+    let memory_id = memory.remember(experience, None)?;
+    println!("Stored memory: {:?}", memory_id);
 
     // Semantic search
-    let results = memory.recall("user-1", "user preferences", 5)?;
+    let query = Query::builder()
+        .query_text("user interface preferences")
+        .max_results(5)
+        .build();
+
+    let results = memory.recall(&query)?;
     for mem in results {
-        println!("{} (importance: {:.2})", mem.content, mem.importance);
+        println!("{} (importance: {:.2})", mem.experience.content, mem.importance());
     }
+
+    // Flush to disk
+    memory.flush_storage()?;
 
     Ok(())
 }
@@ -58,148 +64,187 @@ fn main() -> Result<()> {
 
 ## Features
 
-- **Semantic search** — MiniLM-L6 embeddings (384-dim) for meaning-based retrieval
-- **Hebbian learning** — Connections strengthen when memories co-activate
-- **Activation decay** — Unused memories fade naturally (exponential decay)
-- **Entity extraction** — TinyBERT NER extracts people, orgs, locations
-- **Knowledge graph** — Entity relationships with spreading activation
-- **3-tier architecture** — Working → Session → Long-term memory (Cowan's model)
-- **100% offline** — Works on air-gapped systems after initial model download
+- **Semantic search** - MiniLM-L6 embeddings (384-dim) for meaning-based retrieval
+- **Hebbian learning** - Connections strengthen when memories co-activate
+- **Activation decay** - Unused memories fade naturally (exponential decay)
+- **Entity extraction** - TinyBERT NER extracts people, orgs, locations
+- **Knowledge graph** - Entity relationships with spreading activation
+- **3-tier architecture** - Working → Session → Long-term memory (Cowan's model)
+- **100% offline** - Works on air-gapped systems after initial model download
 
-## Memory Types
+## Experience Types
 
 ```rust
-pub enum MemoryType {
-    Decision,     // +0.30 importance
-    Learning,     // +0.25
-    Error,        // +0.25
-    Discovery,    // +0.20
-    Pattern,      // +0.20
-    Task,         // +0.15
-    Context,      // +0.10
-    Conversation, // +0.10
-    Observation,  // +0.05
+pub enum ExperienceType {
+    Conversation,  // Chat interactions
+    Decision,      // Choices made (+0.30 importance)
+    Error,         // Failures/bugs (+0.25)
+    Learning,      // New knowledge (+0.25)
+    Discovery,     // Found something (+0.20)
+    Pattern,       // Recurring behavior (+0.20)
+    Task,          // Work items (+0.15)
+    Context,       // Background info (+0.10)
+    CodeEdit,      // Code changes
+    FileAccess,    // File operations
+    Search,        // Search queries
+    Command,       // Commands executed
+    Observation,   // General notes (+0.05, default)
 }
 ```
 
 ## API Overview
 
-### Core Operations
+### Store Memories (`remember`)
 
 ```rust
-// Store
-memory.remember(user_id, content, memory_type, tags)?;
+// Basic storage
+let experience = Experience {
+    content: "The API uses JWT for authentication".to_string(),
+    experience_type: ExperienceType::Learning,
+    ..Default::default()
+};
+let id = memory.remember(experience, None)?;
 
-// Semantic search
-let results = memory.recall(user_id, query, limit)?;
+// With metadata and tags
+let experience = Experience {
+    content: "User prefers Rust over Python".to_string(),
+    experience_type: ExperienceType::Observation,
+    metadata: [("source".to_string(), "conversation".to_string())].into(),
+    ..Default::default()
+};
+memory.remember(experience, None)?;
 
-// Tag-based search (fast, no embedding)
-let results = memory.recall_by_tags(user_id, &["tag1", "tag2"], limit)?;
-
-// Date range search
-let results = memory.recall_by_date(user_id, start, end, limit)?;
-
-// Get single memory
-let mem = memory.get_memory(memory_id)?;
-
-// List all
-let all = memory.list_memories(user_id, limit)?;
-
-// Statistics
-let stats = memory.get_stats(user_id)?;
+// With custom timestamp
+use chrono::Utc;
+memory.remember(experience, Some(Utc::now()))?;
 ```
 
-### Forget Operations
+### Retrieve Memories (`recall`)
 
 ```rust
-// Delete single
-memory.forget(memory_id)?;
+// Semantic search
+let query = Query::builder()
+    .query_text("authentication methods")
+    .max_results(10)
+    .build();
+let results = memory.recall(&query)?;
 
-// Delete old memories
-memory.forget_by_age(user_id, days)?;
+// Filter by type
+let query = Query::builder()
+    .query_text("errors")
+    .experience_types(vec![ExperienceType::Error])
+    .build();
+let results = memory.recall(&query)?;
 
-// Delete low-importance
-memory.forget_by_importance(user_id, threshold)?;
+// Filter by importance
+let query = Query::builder()
+    .importance_threshold(0.5)
+    .max_results(20)
+    .build();
+let results = memory.recall(&query)?;
 
-// Delete by pattern (regex)
-memory.forget_by_pattern(user_id, r"test.*")?;
+// Convenience methods for common queries
+// Recall by tags (returns all memories with ANY matching tag)
+let results = memory.recall_by_tags(&["auth".to_string(), "security".to_string()], 20)?;
+
+// Recall by date range
+use chrono::{Utc, Duration};
+let now = Utc::now();
+let start = now - Duration::days(7);
+let results = memory.recall_by_date(start, now, 50)?;
+
+// Pagination
+let query = Query::builder()
+    .query_text("preferences")
+    .max_results(10)
+    .offset(20)  // Skip first 20
+    .build();
+let paginated = memory.paginated_recall(&query)?;
+println!("Has more: {}", paginated.has_more);
+```
+
+### Forget Memories
+
+```rust
+use shodh_memory::memory::types::MemoryId;
+
+// Delete by ID
+memory.forget(ForgetCriteria::ById(memory_id))?;
+
+// Delete old memories (older than N days)
+memory.forget(ForgetCriteria::OlderThan(30))?;
+
+// Delete low-importance memories
+memory.forget(ForgetCriteria::LowImportance(0.1))?;
+
+// Delete by regex pattern
+memory.forget(ForgetCriteria::Pattern(r"test.*".to_string()))?;
 
 // Delete by tags
-memory.forget_by_tags(user_id, &["temporary"])?;
+memory.forget(ForgetCriteria::ByTags(vec!["temporary".to_string()]))?;
 
-// Delete date range
-memory.forget_by_date(user_id, start, end)?;
+// Delete by date range
+use chrono::{Utc, Duration};
+let end = Utc::now();
+let start = end - Duration::days(7);
+memory.forget(ForgetCriteria::ByDateRange { start, end })?;
 
-// GDPR: Delete all
-memory.forget_all(user_id)?;
+// GDPR: Delete everything
+memory.forget(ForgetCriteria::All)?;
 ```
 
-### Context & Introspection
+### Statistics & Maintenance
 
 ```rust
-// Context summary for LLM bootstrap
-let summary = memory.context_summary(user_id, max_items)?;
+// Get stats
+let stats = memory.stats();
+println!("Total memories: {}", stats.total_memories);
+println!("Long-term: {}", stats.long_term_memory_count);
+println!("Vector indexed: {}", stats.vector_index_count);
 
-// 3-tier memory state
-let state = memory.brain_state(user_id)?;
-
-// Consolidation report (learning activity)
-let report = memory.consolidation_report(user_id, since, until)?;
+// Storage stats
+let storage_stats = memory.get_storage_stats()?;
 
 // Flush to disk
-memory.flush()?;
+memory.flush_storage()?;
+
+// Run maintenance (decay old memories)
+let processed = memory.run_maintenance(0.95)?;
+
+// Index health
+let health = memory.index_health();
+println!("Healthy: {}", health.healthy);
 ```
-
-## REST Server
-
-Run the built-in HTTP server:
-
-```rust
-use shodh_memory::server::run_server;
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    run_server("0.0.0.0:3030").await
-}
-```
-
-Or use the binary:
-
-```bash
-cargo install shodh-memory
-shodh-memory-server
-```
-
-## Performance
-
-Measured on Intel i7-1355U (10 cores, 1.7GHz):
-
-| Operation | Latency |
-|-----------|---------|
-| `remember()` | 55-60ms |
-| `recall()` semantic | 34-58ms |
-| `recall_by_tags()` | ~1ms |
-| Entity lookup | 763ns |
-| Hebbian strengthen | 5.7µs |
-| Graph traversal (3-hop) | 30µs |
 
 ## Configuration
 
 ```rust
-let config = MemoryConfig::default()
-    .with_storage_path("./data")
-    .with_working_memory_capacity(100)
-    .with_session_memory_limit_mb(500)
-    .with_decay_factor(0.95)
-    .with_maintenance_interval_secs(300);
+let config = MemoryConfig {
+    // Storage location
+    storage_path: "./data".into(),
+
+    // Working memory: hot cache for recent memories
+    working_memory_size: 100,  // entries
+
+    // Session memory: warm cache
+    session_memory_size_mb: 500,  // MB
+
+    // Per-user heap limit (prevents OOM)
+    max_heap_per_user_mb: 256,  // MB
+
+    // Auto-compress old memories
+    auto_compress: true,
+    compression_age_days: 30,
+
+    // Importance threshold for long-term storage
+    importance_threshold: 0.3,
+};
 ```
 
 Environment variables:
 
 ```bash
 SHODH_MEMORY_PATH=./data
-SHODH_MAINTENANCE_INTERVAL=300
-SHODH_ACTIVATION_DECAY=0.95
 SHODH_OFFLINE=true  # Disable auto-download
 RUST_LOG=info
 ```
@@ -218,6 +263,20 @@ Working Memory ──overflow──> Session Memory ──importance──> Long
 - Long-term potentiation (permanent connections)
 - Memory replay during maintenance
 - Retroactive interference detection
+
+## Performance
+
+Measured on Intel i7-1355U (10 cores, 1.7GHz):
+
+| Operation | Latency |
+|-----------|---------|
+| `remember()` | 55-60ms |
+| `recall()` semantic | 34-58ms |
+| `recall_by_tags()` | ~1ms |
+| `recall_by_date()` | ~2ms |
+| Entity lookup | 763ns |
+| Hebbian strengthen | 5.7µs |
+| Graph traversal (3-hop) | 30µs |
 
 ## Platform Support
 

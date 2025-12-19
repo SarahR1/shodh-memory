@@ -92,7 +92,7 @@ fn populate_memories(memory_system: &mut MemorySystem, count: usize) {
             ..Default::default()
         };
         memory_system
-            .record(experience, None)
+            .remember(experience, None)
             .expect("Failed to record");
     }
 }
@@ -263,7 +263,7 @@ fn bench_pipeline_step4_storage(c: &mut Criterion) {
                 experience_type: ExperienceType::Observation,
                 ..Default::default()
             },
-            |exp| memory_system.record(exp, None).expect("Failed to store"),
+            |exp| memory_system.remember(exp, None).expect("Failed to store"),
             BatchSize::SmallInput,
         );
     });
@@ -276,7 +276,7 @@ fn bench_pipeline_step4_storage(c: &mut Criterion) {
                 experience_type: ExperienceType::Decision,
                 ..Default::default()
             },
-            |exp| memory_system.record(exp, None).expect("Failed to store"),
+            |exp| memory_system.remember(exp, None).expect("Failed to store"),
             BatchSize::SmallInput,
         );
     });
@@ -289,7 +289,7 @@ fn bench_pipeline_step4_storage(c: &mut Criterion) {
                 experience_type: ExperienceType::Learning,
                 ..Default::default()
             },
-            |exp| memory_system.record(exp, None).expect("Failed to store"),
+            |exp| memory_system.remember(exp, None).expect("Failed to store"),
             BatchSize::SmallInput,
         );
     });
@@ -323,7 +323,7 @@ fn bench_pipeline_step5_retrieval(c: &mut Criterion) {
                     retrieval_mode: RetrievalMode::Similarity,
                     ..Default::default()
                 };
-                memory_system.retrieve(&query).expect("Failed to retrieve")
+                memory_system.recall(&query).expect("Failed to retrieve")
             });
         });
     }
@@ -337,7 +337,7 @@ fn bench_pipeline_step5_retrieval(c: &mut Criterion) {
                 retrieval_mode: RetrievalMode::Similarity,
                 ..Default::default()
             };
-            memory_system.retrieve(&query).expect("Failed")
+            memory_system.recall(&query).expect("Failed")
         });
     });
 
@@ -349,7 +349,7 @@ fn bench_pipeline_step5_retrieval(c: &mut Criterion) {
                 retrieval_mode: RetrievalMode::Hybrid,
                 ..Default::default()
             };
-            memory_system.retrieve(&query).expect("Failed")
+            memory_system.recall(&query).expect("Failed")
         });
     });
 
@@ -380,7 +380,7 @@ fn bench_full_pipeline_end_to_end(c: &mut Criterion) {
                 ..Default::default()
             };
             let _id = memory_system
-                .record(experience, None)
+                .remember(experience, None)
                 .expect("Failed to record");
 
             // Retrieve related memories (Embedding + Vector Search)
@@ -390,7 +390,7 @@ fn bench_full_pipeline_end_to_end(c: &mut Criterion) {
                 retrieval_mode: RetrievalMode::Hybrid,
                 ..Default::default()
             };
-            memory_system.retrieve(&query).expect("Failed to retrieve")
+            memory_system.recall(&query).expect("Failed to retrieve")
         });
     });
 }
@@ -442,7 +442,7 @@ fn bench_pipeline_breakdown_timing(c: &mut Criterion) {
             entities: entities.iter().map(|e| e.text.clone()).collect(),
             ..Default::default()
         };
-        memory_system.record(exp, None).expect("Failed to record");
+        memory_system.remember(exp, None).expect("Failed to record");
         store_times.push(start.elapsed());
 
         // Retrieval timing
@@ -453,7 +453,7 @@ fn bench_pipeline_breakdown_timing(c: &mut Criterion) {
             retrieval_mode: RetrievalMode::Similarity,
             ..Default::default()
         };
-        let _ = memory_system.retrieve(&query);
+        let _ = memory_system.recall(&query);
         retrieve_times.push(start.elapsed());
     }
 

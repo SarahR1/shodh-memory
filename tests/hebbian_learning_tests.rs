@@ -67,13 +67,13 @@ fn test_retrieve_returns_memories() {
 
     // Record some memories
     memory
-        .record(
+        .remember(
             create_experience("Robot detected obstacle at entrance"),
             None,
         )
         .unwrap();
     memory
-        .record(create_experience("Drone completed patrol route"), None)
+        .remember(create_experience("Drone completed patrol route"), None)
         .unwrap();
 
     // Retrieve
@@ -83,7 +83,7 @@ fn test_retrieve_returns_memories() {
         ..Default::default()
     };
 
-    let results = memory.retrieve(&query).unwrap();
+    let results = memory.recall(&query).unwrap();
     assert!(!results.is_empty(), "Should find relevant memories");
 }
 
@@ -94,7 +94,7 @@ fn test_retrieve_multiple_related() {
     // Record related memories
     for i in 0..10 {
         memory
-            .record(
+            .remember(
                 create_experience(&format!("Warehouse section {} inventory check complete", i)),
                 None,
             )
@@ -107,7 +107,7 @@ fn test_retrieve_multiple_related() {
         ..Default::default()
     };
 
-    let results = memory.retrieve(&query).unwrap();
+    let results = memory.recall(&query).unwrap();
     assert!(results.len() >= 5, "Should find multiple related memories");
 }
 
@@ -121,7 +121,7 @@ fn test_reinforce_helpful_boosts_importance() {
 
     // Record memory
     let id = memory
-        .record(
+        .remember(
             create_experience("Critical safety procedure: always check battery before flight"),
             None,
         )
@@ -134,7 +134,7 @@ fn test_reinforce_helpful_boosts_importance() {
     // Reinforce as helpful
     let ids = vec![id];
     let stats = memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .unwrap();
 
     assert!(
@@ -156,7 +156,7 @@ fn test_reinforce_misleading_decays_importance() {
 
     // Record memory with high importance
     let id = memory
-        .record(
+        .remember(
             Experience {
                 content: "Outdated procedure that no longer applies".to_string(),
                 experience_type: ExperienceType::Decision,
@@ -173,7 +173,7 @@ fn test_reinforce_misleading_decays_importance() {
     // Reinforce as misleading
     let ids = vec![id];
     let stats = memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Misleading)
+        .reinforce_recall(&ids, RetrievalOutcome::Misleading)
         .unwrap();
 
     assert!(
@@ -195,7 +195,7 @@ fn test_reinforce_neutral_no_change() {
 
     // Record memory
     let id = memory
-        .record(
+        .remember(
             create_experience("General observation about warehouse"),
             None,
         )
@@ -208,7 +208,7 @@ fn test_reinforce_neutral_no_change() {
     // Reinforce as neutral
     let ids = vec![id];
     let stats = memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Neutral)
+        .reinforce_recall(&ids, RetrievalOutcome::Neutral)
         .unwrap();
 
     // Check stats
@@ -226,13 +226,13 @@ fn test_co_retrieval_strengthens_association() {
 
     // Record related memories
     let id1 = memory
-        .record(
+        .remember(
             create_experience("Battery level monitoring is critical for drone safety"),
             None,
         )
         .unwrap();
     let id2 = memory
-        .record(
+        .remember(
             create_experience("Low battery triggers automatic return to base"),
             None,
         )
@@ -241,7 +241,7 @@ fn test_co_retrieval_strengthens_association() {
     // Reinforce both together as helpful
     let ids = vec![id1, id2];
     let stats = memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .unwrap();
 
     assert!(
@@ -256,26 +256,26 @@ fn test_repeated_co_retrieval_increases_strength() {
 
     // Record related memories
     let id1 = memory
-        .record(
+        .remember(
             create_experience("Obstacle A detected at north entrance"),
             None,
         )
         .unwrap();
     let id2 = memory
-        .record(create_experience("Obstacle A is a forklift"), None)
+        .remember(create_experience("Obstacle A is a forklift"), None)
         .unwrap();
 
     let ids = vec![id1, id2];
 
     // Reinforce multiple times
     let stats1 = memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .unwrap();
     let stats2 = memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .unwrap();
     let stats3 = memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .unwrap();
 
     // All should strengthen associations
@@ -289,12 +289,12 @@ fn test_single_memory_no_associations() {
     let (mut memory, _temp) = setup_memory_system();
 
     let id = memory
-        .record(create_experience("Single isolated memory"), None)
+        .remember(create_experience("Single isolated memory"), None)
         .unwrap();
 
     let ids = vec![id];
     let stats = memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .unwrap();
 
     // Single memory can't have associations with itself
@@ -312,7 +312,7 @@ fn test_many_co_retrieved_associations() {
     let mut ids = Vec::new();
     for i in 0..10 {
         let id = memory
-            .record(
+            .remember(
                 create_experience(&format!("Mission log entry {}: patrol sector {}", i, i)),
                 None,
             )
@@ -322,7 +322,7 @@ fn test_many_co_retrieved_associations() {
 
     // Reinforce all together
     let stats = memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .unwrap();
 
     // Should have many associations (n*(n-1)/2 for n=10 = 45)
@@ -342,13 +342,19 @@ fn test_reinforcement_stats_counts() {
     let (mut memory, _temp) = setup_memory_system();
 
     // Record memories
-    let id1 = memory.record(create_experience("Memory 1"), None).unwrap();
-    let id2 = memory.record(create_experience("Memory 2"), None).unwrap();
-    let id3 = memory.record(create_experience("Memory 3"), None).unwrap();
+    let id1 = memory
+        .remember(create_experience("Memory 1"), None)
+        .unwrap();
+    let id2 = memory
+        .remember(create_experience("Memory 2"), None)
+        .unwrap();
+    let id3 = memory
+        .remember(create_experience("Memory 3"), None)
+        .unwrap();
 
     let ids = vec![id1, id2, id3];
     let stats = memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .unwrap();
 
     assert_eq!(stats.memories_processed, 3, "Should process all memories");
@@ -360,7 +366,7 @@ fn test_reinforcement_empty_ids() {
 
     let ids: Vec<shodh_memory::memory::MemoryId> = vec![];
     let stats = memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .unwrap();
 
     assert_eq!(stats.memories_processed, 0);
@@ -380,7 +386,7 @@ fn test_reinforcement_invalid_ids() {
     ];
 
     let stats = memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .unwrap();
 
     // memories_processed counts input IDs, not found memories
@@ -400,7 +406,7 @@ fn test_importance_boost_formula() {
 
     // Create memory with known importance
     let id = memory
-        .record(
+        .remember(
             Experience {
                 content: "Test content".to_string(),
                 experience_type: ExperienceType::Observation,
@@ -415,7 +421,7 @@ fn test_importance_boost_formula() {
 
     // Reinforce as helpful
     memory
-        .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[id.clone()], RetrievalOutcome::Helpful)
         .unwrap();
 
     let after = memory.get_memory(&id).unwrap();
@@ -439,7 +445,7 @@ fn test_importance_decay_formula() {
 
     // Create memory with high importance
     let id = memory
-        .record(
+        .remember(
             Experience {
                 content: "High importance memory".to_string(),
                 experience_type: ExperienceType::Decision,
@@ -455,7 +461,7 @@ fn test_importance_decay_formula() {
 
     // Reinforce as misleading
     memory
-        .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Misleading)
+        .reinforce_recall(&[id.clone()], RetrievalOutcome::Misleading)
         .unwrap();
 
     let after = memory.get_memory(&id).unwrap();
@@ -482,10 +488,10 @@ fn test_ltp_after_multiple_reinforcements() {
     let (mut memory, _temp) = setup_memory_system();
 
     let id1 = memory
-        .record(create_experience("Pattern A observation"), None)
+        .remember(create_experience("Pattern A observation"), None)
         .unwrap();
     let id2 = memory
-        .record(create_experience("Pattern A confirmation"), None)
+        .remember(create_experience("Pattern A confirmation"), None)
         .unwrap();
 
     // Get initial importance
@@ -498,7 +504,7 @@ fn test_ltp_after_multiple_reinforcements() {
     // Each reinforcement adds +5% importance (clamped to 1.0)
     for _ in 0..10 {
         memory
-            .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+            .reinforce_recall(&ids, RetrievalOutcome::Helpful)
             .unwrap();
     }
 
@@ -544,7 +550,7 @@ fn test_retrieve_then_reinforce_cycle() {
     // Record memories
     for i in 0..20 {
         memory
-            .record(
+            .remember(
                 create_experience(&format!("Warehouse zone {} status: operational", i)),
                 None,
             )
@@ -558,7 +564,7 @@ fn test_retrieve_then_reinforce_cycle() {
         ..Default::default()
     };
 
-    let results = memory.retrieve(&query).unwrap();
+    let results = memory.recall(&query).unwrap();
     assert!(!results.is_empty());
 
     // Collect IDs from results
@@ -566,7 +572,7 @@ fn test_retrieve_then_reinforce_cycle() {
 
     // Reinforce
     let stats = memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .unwrap();
 
     assert!(stats.memories_processed > 0);
@@ -578,7 +584,7 @@ fn test_reinforced_memories_rank_higher() {
 
     // Record several memories about the same topic
     let id_target = memory
-        .record(
+        .remember(
             create_experience("Target memory: critical safety protocol"),
             None,
         )
@@ -586,7 +592,7 @@ fn test_reinforced_memories_rank_higher() {
 
     for i in 0..10 {
         memory
-            .record(
+            .remember(
                 create_experience(&format!("Background memory {} about safety", i)),
                 None,
             )
@@ -596,7 +602,7 @@ fn test_reinforced_memories_rank_higher() {
     // Reinforce the target memory multiple times
     for _ in 0..5 {
         memory
-            .reinforce_retrieval(&[id_target.clone()], RetrievalOutcome::Helpful)
+            .reinforce_recall(&[id_target.clone()], RetrievalOutcome::Helpful)
             .unwrap();
     }
 
@@ -607,7 +613,7 @@ fn test_reinforced_memories_rank_higher() {
         ..Default::default()
     };
 
-    let results = memory.retrieve(&query).unwrap();
+    let results = memory.recall(&query).unwrap();
 
     // Target should be in top results due to higher importance
     let target_found = results.iter().any(|m| m.id == id_target);
@@ -626,13 +632,13 @@ fn test_reinforce_same_memory_twice() {
     let (mut memory, _temp) = setup_memory_system();
 
     let id = memory
-        .record(create_experience("Duplicate test"), None)
+        .remember(create_experience("Duplicate test"), None)
         .unwrap();
 
     // Pass same ID twice
     let ids = vec![id.clone(), id.clone()];
     let stats = memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .unwrap();
 
     // Should deduplicate or handle gracefully
@@ -644,21 +650,21 @@ fn test_alternating_feedback() {
     let (mut memory, _temp) = setup_memory_system();
 
     let id = memory
-        .record(create_experience("Alternating feedback test"), None)
+        .remember(create_experience("Alternating feedback test"), None)
         .unwrap();
 
     // Alternate helpful and misleading
     memory
-        .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[id.clone()], RetrievalOutcome::Helpful)
         .unwrap();
     memory
-        .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Misleading)
+        .reinforce_recall(&[id.clone()], RetrievalOutcome::Misleading)
         .unwrap();
     memory
-        .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Helpful)
+        .reinforce_recall(&[id.clone()], RetrievalOutcome::Helpful)
         .unwrap();
     memory
-        .reinforce_retrieval(&[id.clone()], RetrievalOutcome::Misleading)
+        .reinforce_recall(&[id.clone()], RetrievalOutcome::Misleading)
         .unwrap();
 
     // Memory should still exist and be valid - get_memory returns Result<Memory>, success means it exists
@@ -677,7 +683,7 @@ fn test_high_volume_reinforcement() {
     let mut ids = Vec::new();
     for i in 0..100 {
         let id = memory
-            .record(
+            .remember(
                 create_experience(&format!("High volume memory {}", i)),
                 None,
             )
@@ -689,7 +695,7 @@ fn test_high_volume_reinforcement() {
     for chunk in ids.chunks(10) {
         let chunk_ids: Vec<_> = chunk.to_vec();
         let stats = memory
-            .reinforce_retrieval(&chunk_ids, RetrievalOutcome::Helpful)
+            .reinforce_recall(&chunk_ids, RetrievalOutcome::Helpful)
             .unwrap();
         assert!(stats.memories_processed > 0);
     }
@@ -725,17 +731,17 @@ fn test_hebbian_graph_persists_across_restart() {
         let mut memory = MemorySystem::new(config.clone()).expect("Failed to create system");
 
         id1 = memory
-            .record(create_experience("Hebbian persistence test memory A"), None)
+            .remember(create_experience("Hebbian persistence test memory A"), None)
             .unwrap();
         id2 = memory
-            .record(create_experience("Hebbian persistence test memory B"), None)
+            .remember(create_experience("Hebbian persistence test memory B"), None)
             .unwrap();
 
         // Strengthen association by co-retrieval
         let ids = vec![id1.clone(), id2.clone()];
         for _ in 0..5 {
             memory
-                .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+                .reinforce_recall(&ids, RetrievalOutcome::Helpful)
                 .unwrap();
         }
 
@@ -788,17 +794,17 @@ fn test_hebbian_edge_strength_persists() {
         let mut memory = MemorySystem::new(config.clone()).expect("Failed to create system");
 
         id1 = memory
-            .record(create_experience("Edge strength test A"), None)
+            .remember(create_experience("Edge strength test A"), None)
             .unwrap();
         id2 = memory
-            .record(create_experience("Edge strength test B"), None)
+            .remember(create_experience("Edge strength test B"), None)
             .unwrap();
 
         // Strengthen many times to increase edge strength
         let ids = vec![id1.clone(), id2.clone()];
         for _ in 0..10 {
             memory
-                .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+                .reinforce_recall(&ids, RetrievalOutcome::Helpful)
                 .unwrap();
         }
 
@@ -834,13 +840,13 @@ fn test_coactivation_during_retrieve_forms_edges() {
 
     // Record memories
     let id1 = memory
-        .record(
+        .remember(
             create_experience("Coactivation test: robot navigation"),
             None,
         )
         .unwrap();
     let id2 = memory
-        .record(
+        .remember(
             create_experience("Coactivation test: robot obstacle avoidance"),
             None,
         )
@@ -856,7 +862,7 @@ fn test_coactivation_during_retrieve_forms_edges() {
         max_results: 10,
         ..Default::default()
     };
-    let results = memory.retrieve(&query).unwrap();
+    let results = memory.recall(&query).unwrap();
 
     // If both memories were returned, edges should form
     let both_returned = results.iter().any(|m| m.id == id1) && results.iter().any(|m| m.id == id2);
@@ -885,17 +891,17 @@ fn test_ltp_persists_across_restart() {
         let mut memory = MemorySystem::new(config.clone()).expect("Failed to create system");
 
         id1 = memory
-            .record(create_experience("LTP persistence test A"), None)
+            .remember(create_experience("LTP persistence test A"), None)
             .unwrap();
         id2 = memory
-            .record(create_experience("LTP persistence test B"), None)
+            .remember(create_experience("LTP persistence test B"), None)
             .unwrap();
 
         // Reinforce many times to trigger LTP (threshold typically 5-10)
         let ids = vec![id1.clone(), id2.clone()];
         for _ in 0..15 {
             memory
-                .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+                .reinforce_recall(&ids, RetrievalOutcome::Helpful)
                 .unwrap();
         }
 
@@ -929,7 +935,7 @@ fn test_graph_stats_accuracy() {
     let mut ids = Vec::new();
     for i in 0..5 {
         let id = memory
-            .record(
+            .remember(
                 create_experience(&format!("Graph stats test memory {}", i)),
                 None,
             )
@@ -939,7 +945,7 @@ fn test_graph_stats_accuracy() {
 
     // Form associations between all pairs
     memory
-        .reinforce_retrieval(&ids, RetrievalOutcome::Helpful)
+        .reinforce_recall(&ids, RetrievalOutcome::Helpful)
         .unwrap();
 
     let stats = memory.graph_stats();

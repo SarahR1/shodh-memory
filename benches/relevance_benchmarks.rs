@@ -70,7 +70,7 @@ fn populate_memories_for_relevance(memory: &mut MemorySystem, count: usize) {
             entities: entity_names,
             ..Default::default()
         };
-        memory.record(exp, None).expect("Failed to record");
+        memory.remember(exp, None).expect("Failed to record");
     }
 }
 

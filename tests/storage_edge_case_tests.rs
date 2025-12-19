@@ -63,7 +63,7 @@ fn test_empty_content_handling() {
     };
 
     // Empty content should be handled gracefully
-    let result = system.record(exp, None);
+    let result = system.remember(exp, None);
     assert!(
         result.is_ok(),
         "Empty content should be accepted: {:?}",
@@ -83,7 +83,7 @@ fn test_whitespace_only_content() {
         ..Default::default()
     };
 
-    let result = system.record(exp, None);
+    let result = system.remember(exp, None);
     assert!(result.is_ok(), "Whitespace-only content should be accepted");
 }
 
@@ -101,7 +101,7 @@ fn test_very_long_content() {
         ..Default::default()
     };
 
-    let result = system.record(exp, None);
+    let result = system.remember(exp, None);
     assert!(result.is_ok(), "Long content should be accepted");
 }
 
@@ -123,7 +123,7 @@ fn test_unicode_content() {
     };
 
     let memory_id = system
-        .record(exp, None)
+        .remember(exp, None)
         .expect("Failed to record unicode content");
 
     // Verify retrieval
@@ -133,7 +133,7 @@ fn test_unicode_content() {
         ..Default::default()
     };
 
-    let results = system.retrieve(&query).expect("Failed to retrieve");
+    let results = system.recall(&query).expect("Failed to retrieve");
     assert!(!results.is_empty(), "Unicode content should be retrievable");
     assert!(
         results[0].experience.content.contains("你好世界"),
@@ -153,7 +153,7 @@ fn test_special_characters_content() {
         ..Default::default()
     };
 
-    let result = system.record(exp, None);
+    let result = system.remember(exp, None);
     assert!(result.is_ok(), "Special characters should be accepted");
 }
 
@@ -169,7 +169,7 @@ fn test_null_bytes_content() {
         ..Default::default()
     };
 
-    let result = system.record(exp, None);
+    let result = system.remember(exp, None);
     assert!(result.is_ok(), "Null bytes should be handled");
 }
 
@@ -192,7 +192,7 @@ fn test_many_entities() {
         ..Default::default()
     };
 
-    let result = system.record(exp, None);
+    let result = system.remember(exp, None);
     assert!(result.is_ok(), "Many entities should be accepted");
 }
 
@@ -209,7 +209,7 @@ fn test_empty_entity_name() {
         ..Default::default()
     };
 
-    let result = system.record(exp, None);
+    let result = system.remember(exp, None);
     assert!(result.is_ok(), "Empty entity names should be handled");
 }
 
@@ -226,7 +226,7 @@ fn test_unicode_entity_names() {
         ..Default::default()
     };
 
-    let result = system.record(exp, None);
+    let result = system.remember(exp, None);
     assert!(result.is_ok(), "Unicode entity names should be accepted");
 
     // Search by unicode tag
@@ -236,7 +236,7 @@ fn test_unicode_entity_names() {
         ..Default::default()
     };
 
-    let results = system.retrieve(&query).expect("Failed to retrieve");
+    let results = system.recall(&query).expect("Failed to retrieve");
     // May or may not find results depending on tag indexing
 }
 
@@ -267,7 +267,7 @@ fn test_geo_location_boundary_values() {
             ..Default::default()
         };
 
-        let result = system.record(exp, None);
+        let result = system.remember(exp, None);
         assert!(
             result.is_ok(),
             "Boundary location {} should be accepted",
@@ -291,7 +291,7 @@ fn test_geo_location_invalid_coordinates() {
     };
 
     // Should either clamp or reject gracefully
-    let result = system.record(exp, None);
+    let result = system.remember(exp, None);
     // Either way, it shouldn't crash
     assert!(result.is_ok() || result.is_err());
 }
@@ -309,7 +309,7 @@ fn test_geo_filter_zero_radius() {
         geo_location: Some([37.7749, -122.4194, 0.0]),
         ..Default::default()
     };
-    system.record(exp, None).expect("Failed to record");
+    system.remember(exp, None).expect("Failed to record");
 
     // Query with zero radius
     let query = Query {
@@ -319,7 +319,7 @@ fn test_geo_filter_zero_radius() {
         ..Default::default()
     };
 
-    let result = system.retrieve(&query);
+    let result = system.recall(&query);
     assert!(result.is_ok(), "Zero radius query should not crash");
 }
 
@@ -346,7 +346,7 @@ fn test_large_metadata() {
         ..Default::default()
     };
 
-    let result = system.record(exp, None);
+    let result = system.remember(exp, None);
     assert!(result.is_ok(), "Large metadata should be accepted");
 }
 
@@ -367,7 +367,7 @@ fn test_unicode_metadata_keys_values() {
         ..Default::default()
     };
 
-    let result = system.record(exp, None);
+    let result = system.remember(exp, None);
     assert!(result.is_ok(), "Unicode metadata should be accepted");
 }
 
@@ -395,7 +395,7 @@ fn test_sensor_data_extreme_values() {
         ..Default::default()
     };
 
-    let result = system.record(exp, None);
+    let result = system.remember(exp, None);
     assert!(result.is_ok(), "Extreme sensor values should be accepted");
 }
 
@@ -418,7 +418,7 @@ fn test_sensor_data_special_floats() {
     };
 
     // Should handle NaN/Infinity gracefully
-    let result = system.record(exp, None);
+    let result = system.remember(exp, None);
     // May succeed or fail, but shouldn't panic
     assert!(result.is_ok() || result.is_err());
 }
@@ -440,7 +440,7 @@ fn test_query_very_long_text() {
             experience_type: ExperienceType::Observation,
             ..Default::default()
         };
-        system.record(exp, None).expect("Failed to record");
+        system.remember(exp, None).expect("Failed to record");
     }
 
     // Query with very long text
@@ -451,7 +451,7 @@ fn test_query_very_long_text() {
         ..Default::default()
     };
 
-    let result = system.retrieve(&query);
+    let result = system.recall(&query);
     assert!(result.is_ok(), "Long query text should not crash");
 }
 
@@ -467,7 +467,7 @@ fn test_query_max_results_zero() {
         experience_type: ExperienceType::Observation,
         ..Default::default()
     };
-    system.record(exp, None).expect("Failed to record");
+    system.remember(exp, None).expect("Failed to record");
 
     // Query with max_results = 0
     let query = Query {
@@ -477,7 +477,7 @@ fn test_query_max_results_zero() {
     };
 
     // Zero max_results should not crash - behavior may vary
-    let result = system.retrieve(&query);
+    let result = system.recall(&query);
     assert!(result.is_ok(), "Zero max_results should not crash");
 }
 
@@ -494,7 +494,7 @@ fn test_query_max_results_very_large() {
             experience_type: ExperienceType::Observation,
             ..Default::default()
         };
-        system.record(exp, None).expect("Failed to record");
+        system.remember(exp, None).expect("Failed to record");
     }
 
     // Query with very large max_results
@@ -504,7 +504,7 @@ fn test_query_max_results_very_large() {
         ..Default::default()
     };
 
-    let result = system.retrieve(&query);
+    let result = system.recall(&query);
     assert!(result.is_ok(), "Large max_results should not crash");
     // Should only return actual memories (5), not allocate for 1M
 }
@@ -540,7 +540,7 @@ fn test_reward_boundary_values() {
         };
 
         // Should handle all reward values gracefully
-        let _ = system.record(exp, None);
+        let _ = system.remember(exp, None);
     }
 
     // System should still be functional
@@ -564,7 +564,7 @@ fn test_confidence_boundary_values() {
             ..Default::default()
         };
 
-        let _ = system.record(exp, None);
+        let _ = system.remember(exp, None);
     }
 
     let stats = system.stats();
@@ -589,14 +589,14 @@ fn test_rapid_sequential_operations() {
                 experience_type: ExperienceType::Observation,
                 ..Default::default()
             };
-            let _ = system.record(exp, None);
+            let _ = system.remember(exp, None);
         } else {
             let query = Query {
                 query_text: Some("Rapid test".to_string()),
                 max_results: 5,
                 ..Default::default()
             };
-            let _ = system.retrieve(&query);
+            let _ = system.recall(&query);
         }
     }
 
@@ -621,7 +621,7 @@ fn test_flush_under_load() {
                 experience_type: ExperienceType::Observation,
                 ..Default::default()
             };
-            system.record(exp, None).expect("Failed to record");
+            system.remember(exp, None).expect("Failed to record");
         }
 
         system.flush_storage().expect("Failed to flush");
@@ -663,7 +663,7 @@ fn test_data_survives_reopen() {
                 entities: vec!["persistence".to_string()],
                 ..Default::default()
             };
-            system.record(exp, None).expect("Failed to record");
+            system.remember(exp, None).expect("Failed to record");
         }
 
         system.flush_storage().expect("Failed to flush");
@@ -695,7 +695,7 @@ fn test_data_survives_reopen() {
             ..Default::default()
         };
 
-        let results = system.retrieve(&query).expect("Failed to retrieve");
+        let results = system.recall(&query).expect("Failed to retrieve");
         assert!(
             results.len() >= 5,
             "Should retrieve persisted memories, got {}",

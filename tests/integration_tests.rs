@@ -198,7 +198,7 @@ fn test_core_memory_operations() {
 
     let system = match system_result {
         Ok(s) => {
-            reporter.record(
+            reporter.remember(
                 "Initialize memory system",
                 true,
                 init_duration,
@@ -207,7 +207,7 @@ fn test_core_memory_operations() {
             s
         }
         Err(e) => {
-            reporter.record(
+            reporter.remember(
                 "Initialize memory system",
                 false,
                 init_duration,
@@ -237,12 +237,12 @@ fn test_core_memory_operations() {
         ..Default::default()
     };
 
-    let record_result = system.record(experience, None);
+    let record_result = system.remember(experience, None);
     let record_duration = start.elapsed().as_millis();
 
     match record_result {
         Ok(memory_id) => {
-            reporter.record(
+            reporter.remember(
                 "Record experience",
                 true,
                 record_duration,
@@ -250,7 +250,7 @@ fn test_core_memory_operations() {
             );
         }
         Err(e) => {
-            reporter.record(
+            reporter.remember(
                 "Record experience",
                 false,
                 record_duration,
@@ -268,13 +268,13 @@ fn test_core_memory_operations() {
             "robot_001",
             vec!["sensor", "waypoint"],
         );
-        if system.record(exp, None).is_ok() {
+        if system.remember(exp, None).is_ok() {
             success_count += 1;
         }
     }
     let batch_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         "Batch record (10 memories)",
         success_count == 10,
         batch_duration,
@@ -295,12 +295,12 @@ fn test_core_memory_operations() {
         ..Default::default()
     };
 
-    let retrieve_result = system.retrieve(&query);
+    let retrieve_result = system.recall(&query);
     let retrieve_duration = start.elapsed().as_millis();
 
     match retrieve_result {
         Ok(memories) => {
-            reporter.record(
+            reporter.remember(
                 "Semantic retrieval",
                 !memories.is_empty(),
                 retrieve_duration,
@@ -312,7 +312,7 @@ fn test_core_memory_operations() {
             );
         }
         Err(e) => {
-            reporter.record(
+            reporter.remember(
                 "Semantic retrieval",
                 false,
                 retrieve_duration,
@@ -329,12 +329,12 @@ fn test_core_memory_operations() {
         ..Default::default()
     };
 
-    let entity_result = system.retrieve(&query);
+    let entity_result = system.recall(&query);
     let entity_duration = start.elapsed().as_millis();
 
     match entity_result {
         Ok(memories) => {
-            reporter.record(
+            reporter.remember(
                 "Entity-based retrieval",
                 true,
                 entity_duration,
@@ -342,7 +342,7 @@ fn test_core_memory_operations() {
             );
         }
         Err(e) => {
-            reporter.record(
+            reporter.remember(
                 "Entity-based retrieval",
                 false,
                 entity_duration,
@@ -404,14 +404,14 @@ fn test_robotics_scenarios() {
                 mission_id: Some(mission_id.to_string()),
                 ..Default::default()
             };
-            if system.record(exp, None).is_err() {
+            if system.remember(exp, None).is_err() {
                 mission_success = false;
             }
         }
     }
     let mission_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         "Mission memory tracking",
         mission_success,
         mission_duration,
@@ -427,12 +427,12 @@ fn test_robotics_scenarios() {
         ..Default::default()
     };
 
-    let patrol_result = system.retrieve(&query);
+    let patrol_result = system.recall(&query);
     let patrol_duration = start.elapsed().as_millis();
 
     match patrol_result {
         Ok(memories) => {
-            reporter.record(
+            reporter.remember(
                 "Mission-filtered retrieval",
                 true,
                 patrol_duration,
@@ -440,7 +440,7 @@ fn test_robotics_scenarios() {
             );
         }
         Err(e) => {
-            reporter.record(
+            reporter.remember(
                 "Mission-filtered retrieval",
                 false,
                 patrol_duration,
@@ -473,13 +473,13 @@ fn test_robotics_scenarios() {
             action_type: Some("obstacle_detection".to_string()),
             ..Default::default()
         };
-        if system.record(exp, None).is_ok() {
+        if system.remember(exp, None).is_ok() {
             obstacle_count += 1;
         }
     }
     let obstacle_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         "Obstacle memory storage",
         obstacle_count == 3,
         obstacle_duration,
@@ -495,12 +495,12 @@ fn test_robotics_scenarios() {
         ..Default::default()
     };
 
-    let obstacle_query_result = system.retrieve(&query);
+    let obstacle_query_result = system.recall(&query);
     let obstacle_query_duration = start.elapsed().as_millis();
 
     match obstacle_query_result {
         Ok(memories) => {
-            reporter.record(
+            reporter.remember(
                 "Obstacle memory retrieval",
                 true,
                 obstacle_query_duration,
@@ -508,7 +508,7 @@ fn test_robotics_scenarios() {
             );
         }
         Err(e) => {
-            reporter.record(
+            reporter.remember(
                 "Obstacle memory retrieval",
                 false,
                 obstacle_query_duration,
@@ -549,13 +549,13 @@ fn test_robotics_scenarios() {
             sensor_data,
             ..Default::default()
         };
-        if system.record(exp, None).is_err() {
+        if system.remember(exp, None).is_err() {
             calibration_success = false;
         }
     }
     let calibration_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         "Sensor calibration tracking",
         calibration_success,
         calibration_duration,
@@ -570,12 +570,12 @@ fn test_robotics_scenarios() {
         ..Default::default()
     };
 
-    let recal_result = system.retrieve(&query);
+    let recal_result = system.recall(&query);
     let recal_duration = start.elapsed().as_millis();
 
     match recal_result {
         Ok(memories) => {
-            reporter.record(
+            reporter.remember(
                 "Recalibration needs query",
                 true,
                 recal_duration,
@@ -583,7 +583,7 @@ fn test_robotics_scenarios() {
             );
         }
         Err(e) => {
-            reporter.record(
+            reporter.remember(
                 "Recalibration needs query",
                 false,
                 recal_duration,
@@ -629,13 +629,13 @@ fn test_drone_fleet_operations() {
             Some([lat, lon, 100.0]),
             Some("surveillance"),
         );
-        if system.record(exp, None).is_ok() {
+        if system.remember(exp, None).is_ok() {
             success_count += 1;
         }
     }
     let multi_drone_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         "Multi-drone mission init",
         success_count == 3,
         multi_drone_duration,
@@ -667,13 +667,13 @@ fn test_drone_fleet_operations() {
             Some([lat, lon, alt]),
             Some("observation"),
         );
-        if system.record(exp, None).is_ok() {
+        if system.remember(exp, None).is_ok() {
             geo_success += 1;
         }
     }
     let geo_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         "Geo-tagged event recording",
         geo_success == 4,
         geo_duration,
@@ -689,12 +689,12 @@ fn test_drone_fleet_operations() {
         ..Default::default()
     };
 
-    let geo_query_result = system.retrieve(&query);
+    let geo_query_result = system.recall(&query);
     let geo_query_duration = start.elapsed().as_millis();
 
     match geo_query_result {
         Ok(memories) => {
-            reporter.record(
+            reporter.remember(
                 "Geo-spatial retrieval",
                 true,
                 geo_query_duration,
@@ -702,7 +702,7 @@ fn test_drone_fleet_operations() {
             );
         }
         Err(e) => {
-            reporter.record(
+            reporter.remember(
                 "Geo-spatial retrieval",
                 false,
                 geo_query_duration,
@@ -742,13 +742,13 @@ fn test_drone_fleet_operations() {
             reward: Some(1.0),
             ..Default::default()
         };
-        if system.record(exp, None).is_ok() {
+        if system.remember(exp, None).is_ok() {
             path_success += 1;
         }
     }
     let path_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         "Flight path recording",
         path_success == 5,
         path_duration,
@@ -765,12 +765,12 @@ fn test_drone_fleet_operations() {
         ..Default::default()
     };
 
-    let path_query_result = system.retrieve(&query);
+    let path_query_result = system.recall(&query);
     let path_query_duration = start.elapsed().as_millis();
 
     match path_query_result {
         Ok(memories) => {
-            reporter.record(
+            reporter.remember(
                 "Flight path retrieval",
                 true,
                 path_query_duration,
@@ -778,7 +778,7 @@ fn test_drone_fleet_operations() {
             );
         }
         Err(e) => {
-            reporter.record(
+            reporter.remember(
                 "Flight path retrieval",
                 false,
                 path_query_duration,
@@ -818,13 +818,13 @@ fn test_drone_fleet_operations() {
             sensor_data,
             ..Default::default()
         };
-        if system.record(exp, None).is_ok() {
+        if system.remember(exp, None).is_ok() {
             battery_success += 1;
         }
     }
     let battery_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         "Battery telemetry tracking",
         battery_success == 5,
         battery_duration,
@@ -839,12 +839,12 @@ fn test_drone_fleet_operations() {
         ..Default::default()
     };
 
-    let critical_result = system.retrieve(&query);
+    let critical_result = system.recall(&query);
     let critical_duration = start.elapsed().as_millis();
 
     match critical_result {
         Ok(memories) => {
-            reporter.record(
+            reporter.remember(
                 "Critical status retrieval",
                 true,
                 critical_duration,
@@ -852,7 +852,7 @@ fn test_drone_fleet_operations() {
             );
         }
         Err(e) => {
-            reporter.record(
+            reporter.remember(
                 "Critical status retrieval",
                 false,
                 critical_duration,
@@ -891,7 +891,7 @@ fn test_performance_benchmarks() {
                 &format!("perf_robot_{}", i % 5),
                 vec!["performance", "benchmark", "sensor"],
             );
-            if system.record(exp, None).is_ok() {
+            if system.remember(exp, None).is_ok() {
                 success += 1;
             }
         }
@@ -903,7 +903,7 @@ fn test_performance_benchmarks() {
             0.0
         };
 
-        reporter.record(
+        reporter.remember(
             &format!("Insert {batch_size} memories"),
             success == batch_size,
             duration,
@@ -939,13 +939,13 @@ fn test_performance_benchmarks() {
                 max_results: 10,
                 ..Default::default()
             };
-            let _ = system.retrieve(&query);
+            let _ = system.recall(&query);
             total_duration += start.elapsed().as_millis();
         }
 
         let avg_duration = total_duration / iterations as u128;
 
-        reporter.record(
+        reporter.remember(
             &format!("{name} query"),
             avg_duration < 500, // Target: <500ms average
             avg_duration,
@@ -960,7 +960,7 @@ fn test_performance_benchmarks() {
     let stats = system.stats();
     let stats_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         "Stats retrieval",
         true,
         stats_duration,
@@ -997,11 +997,11 @@ fn test_reliability_and_edge_cases() {
         ..Default::default()
     };
 
-    let empty_result = system.record(exp, None);
+    let empty_result = system.remember(exp, None);
     let empty_duration = start.elapsed().as_millis();
 
     // Empty content should still be handled gracefully
-    reporter.record(
+    reporter.remember(
         "Empty content handling",
         empty_result.is_ok(),
         empty_duration,
@@ -1016,10 +1016,10 @@ fn test_reliability_and_edge_cases() {
         ..Default::default()
     };
 
-    let long_result = system.record(exp, None);
+    let long_result = system.remember(exp, None);
     let long_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         "Large content handling (10KB)",
         long_result.is_ok(),
         long_duration,
@@ -1035,10 +1035,10 @@ fn test_reliability_and_edge_cases() {
         ..Default::default()
     };
 
-    let special_result = system.record(exp, None);
+    let special_result = system.remember(exp, None);
     let special_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         "Special characters handling",
         special_result.is_ok(),
         special_duration,
@@ -1055,10 +1055,10 @@ fn test_reliability_and_edge_cases() {
         ..Default::default()
     };
 
-    let empty_query_result = system.retrieve(&query);
+    let empty_query_result = system.recall(&query);
     let empty_query_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         "Empty query handling",
         empty_query_result.is_ok(),
         empty_query_duration,
@@ -1073,12 +1073,12 @@ fn test_reliability_and_edge_cases() {
         ..Default::default()
     };
 
-    let no_results = system.retrieve(&query);
+    let no_results = system.recall(&query);
     let no_results_duration = start.elapsed().as_millis();
 
     match no_results {
         Ok(memories) => {
-            reporter.record(
+            reporter.remember(
                 "No-match query",
                 true,
                 no_results_duration,
@@ -1086,7 +1086,7 @@ fn test_reliability_and_edge_cases() {
             );
         }
         Err(e) => {
-            reporter.record(
+            reporter.remember(
                 "No-match query",
                 false,
                 no_results_duration,
@@ -1109,7 +1109,7 @@ fn test_reliability_and_edge_cases() {
                 "robot_concurrent",
                 vec!["concurrent"],
             );
-            if system.record(exp, None).is_ok() {
+            if system.remember(exp, None).is_ok() {
                 ops_success += 1;
             }
         } else {
@@ -1118,14 +1118,14 @@ fn test_reliability_and_edge_cases() {
                 max_results: 5,
                 ..Default::default()
             };
-            if system.retrieve(&query).is_ok() {
+            if system.recall(&query).is_ok() {
                 ops_success += 1;
             }
         }
     }
     let concurrent_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         "Rapid sequential ops (20)",
         ops_success == 20,
         concurrent_duration,
@@ -1139,7 +1139,7 @@ fn test_reliability_and_edge_cases() {
     let flush_result = system.flush_storage();
     let flush_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         "Storage flush",
         flush_result.is_ok(),
         flush_duration,
@@ -1174,7 +1174,7 @@ fn test_stress_scenarios() {
             &format!("stress_robot_{}", i % 10),
             vec!["stress", "high_volume", "sensor"],
         );
-        if system.record(exp, None).is_ok() {
+        if system.remember(exp, None).is_ok() {
             success += 1;
         }
     }
@@ -1186,7 +1186,7 @@ fn test_stress_scenarios() {
         0.0
     };
 
-    reporter.record(
+    reporter.remember(
         &format!("{target} rapid insertions"),
         success >= (target * 95 / 100), // 95% success threshold
         stress_duration,
@@ -1204,14 +1204,14 @@ fn test_stress_scenarios() {
             max_results: 5,
             ..Default::default()
         };
-        if system.retrieve(&query).is_ok() {
+        if system.recall(&query).is_ok() {
             query_success += 1;
         }
     }
 
     let query_duration = start.elapsed().as_millis();
 
-    reporter.record(
+    reporter.remember(
         &format!("{query_count} queries post-stress"),
         query_success == query_count,
         query_duration,

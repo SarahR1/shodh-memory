@@ -68,7 +68,7 @@ fn populate_memories(memory_system: &mut MemorySystem, count: usize) {
 
         let experience = create_experience_with_ner(&content, &ner);
         memory_system
-            .record(experience, None)
+            .remember(experience, None)
             .expect("Failed to record experience");
     }
 }
@@ -82,7 +82,7 @@ fn populate_memories_no_ner(memory_system: &mut MemorySystem, count: usize) {
         );
         let experience = create_experience(&content);
         memory_system
-            .record(experience, None)
+            .remember(experience, None)
             .expect("Failed to record experience");
     }
 }
@@ -137,7 +137,7 @@ fn bench_record_experience(c: &mut Criterion) {
                     || create_experience(content), // Setup: not measured
                     |experience| {
                         memory_system
-                            .record(experience, None)
+                            .remember(experience, None)
                             .expect("Failed to record")
                     }, // Measured
                     BatchSize::SmallInput,
@@ -172,7 +172,7 @@ fn bench_retrieve_memories(c: &mut Criterion) {
                     ..Default::default()
                 };
 
-                memory_system.retrieve(&query).expect("Failed to retrieve");
+                memory_system.recall(&query).expect("Failed to retrieve");
             });
         });
     }
@@ -244,7 +244,7 @@ fn bench_vector_search(c: &mut Criterion) {
                     ..Default::default()
                 };
 
-                memory_system.retrieve(&query).expect("Failed to search");
+                memory_system.recall(&query).expect("Failed to search");
             });
         });
     }
@@ -291,7 +291,7 @@ fn bench_concurrent_operations(c: &mut Criterion) {
                         let experience = create_experience(&content);
 
                         let mut memory = memory_clone.lock().unwrap();
-                        memory.record(experience, None).expect("Failed to record");
+                        memory.remember(experience, None).expect("Failed to record");
                     });
                     handles.push(handle);
                 }
@@ -342,7 +342,7 @@ fn bench_ner_record_combined(c: &mut Criterion) {
             || create_experience_with_ner(entity_text, &ner),
             |experience| {
                 memory_system
-                    .record(experience, None)
+                    .remember(experience, None)
                     .expect("Failed to record")
             },
             BatchSize::SmallInput,
@@ -355,7 +355,7 @@ fn bench_ner_record_combined(c: &mut Criterion) {
             || create_experience(entity_text),
             |experience| {
                 memory_system
-                    .record(experience, None)
+                    .remember(experience, None)
                     .expect("Failed to record")
             },
             BatchSize::SmallInput,
@@ -392,7 +392,7 @@ fn bench_end_to_end(c: &mut Criterion) {
             // NER extraction + Record
             let content = "User from Infosys completed task X in Bangalore and is now working on task Y with dependencies on Microsoft module Z";
             let experience = create_experience_with_ner(content, &ner);
-            let _memory_id = memory_system.record(experience, None).expect("Failed to record");
+            let _memory_id = memory_system.remember(experience, None).expect("Failed to record");
 
             // Retrieve related memories
             let query = Query {
@@ -402,7 +402,7 @@ fn bench_end_to_end(c: &mut Criterion) {
                 ..Default::default()
             };
 
-            let results = memory_system.retrieve(&query).expect("Failed to retrieve");
+            let results = memory_system.recall(&query).expect("Failed to retrieve");
             assert!(!results.is_empty());
         });
     });
@@ -754,21 +754,21 @@ fn bench_cache_performance(c: &mut Criterion) {
         b.iter(|| {
             let counter = cold_counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let exp = create_experience(&format!("Unique content iteration {counter}"));
-            memory_system.record(exp, None).expect("Failed to record");
+            memory_system.remember(exp, None).expect("Failed to record");
         });
     });
 
     // Warm up the cache with specific content
     for _ in 0..5 {
         let exp = create_experience("Repeated warehouse obstacle at grid 10,20");
-        let _ = memory_system.record(exp, None);
+        let _ = memory_system.remember(exp, None);
     }
 
     // WARM: Use IDENTICAL content every time (cache hits)
     record_group.bench_function("warm_cached", |b| {
         b.iter(|| {
             let exp = create_experience("Repeated warehouse obstacle at grid 10,20");
-            memory_system.record(exp, None).expect("Failed to record");
+            memory_system.remember(exp, None).expect("Failed to record");
         });
     });
 
@@ -792,7 +792,7 @@ fn bench_cache_performance(c: &mut Criterion) {
                 retrieval_mode: shodh_memory::memory::RetrievalMode::Hybrid,
                 ..Default::default()
             };
-            memory_system.retrieve(&query).expect("Failed to retrieve");
+            memory_system.recall(&query).expect("Failed to retrieve");
         });
     });
 
@@ -804,7 +804,7 @@ fn bench_cache_performance(c: &mut Criterion) {
             retrieval_mode: shodh_memory::memory::RetrievalMode::Hybrid,
             ..Default::default()
         };
-        let _ = memory_system.retrieve(&query);
+        let _ = memory_system.recall(&query);
     }
 
     // WARM: Use IDENTICAL query every time (cache hits)
@@ -816,7 +816,7 @@ fn bench_cache_performance(c: &mut Criterion) {
                 retrieval_mode: shodh_memory::memory::RetrievalMode::Hybrid,
                 ..Default::default()
             };
-            memory_system.retrieve(&query).expect("Failed to retrieve");
+            memory_system.recall(&query).expect("Failed to retrieve");
         });
     });
 
@@ -847,7 +847,7 @@ fn bench_forget_operation(c: &mut Criterion) {
                 let (mut memory_system, temp_dir) = setup_memory_system();
                 let experience = create_experience("Memory to be forgotten for benchmark");
                 let memory_id = memory_system
-                    .record(experience, None)
+                    .remember(experience, None)
                     .expect("Failed to record");
                 (memory_system, memory_id, temp_dir)
             },
@@ -868,7 +868,7 @@ fn bench_forget_operation(c: &mut Criterion) {
                 let (mut memory_system, temp_dir) = setup_memory_system();
                 let experience = create_experience("Memory with stats tracking benchmark");
                 let memory_id = memory_system
-                    .record(experience, None)
+                    .remember(experience, None)
                     .expect("Failed to record");
                 let stats_before = memory_system.stats();
                 (memory_system, memory_id, stats_before, temp_dir)
@@ -897,7 +897,7 @@ fn bench_forget_operation(c: &mut Criterion) {
                 for i in 0..10 {
                     let experience = create_experience(&format!("Batch forget memory {i}"));
                     let id = memory_system
-                        .record(experience, None)
+                        .remember(experience, None)
                         .expect("Failed to record");
                     memory_ids.push(id);
                 }
@@ -945,7 +945,7 @@ fn bench_deduplication(c: &mut Criterion) {
                 ..Default::default()
             };
 
-            let results = memory_system.retrieve(&query).expect("Failed to retrieve");
+            let results = memory_system.recall(&query).expect("Failed to retrieve");
 
             // Verify no duplicates in results
             let mut seen_ids = std::collections::HashSet::new();
@@ -969,7 +969,7 @@ fn bench_deduplication(c: &mut Criterion) {
                 ..Default::default()
             };
 
-            let results = memory_system.retrieve(&query).expect("Failed to retrieve");
+            let results = memory_system.recall(&query).expect("Failed to retrieve");
 
             // Verify unique count matches actual count
             let unique_ids: std::collections::HashSet<_> =
@@ -1023,7 +1023,7 @@ fn bench_stats_accuracy(c: &mut Criterion) {
                 let stats_before = memory_system.stats();
                 let experience = create_experience("New memory for stats tracking");
                 memory_system
-                    .record(experience, None)
+                    .remember(experience, None)
                     .expect("Failed to record");
                 let stats_after = memory_system.stats();
 
@@ -1045,7 +1045,7 @@ fn bench_stats_accuracy(c: &mut Criterion) {
                 let (mut memory_system, temp_dir) = setup_memory_system();
                 let experience = create_experience("Memory to track forget stats");
                 let memory_id = memory_system
-                    .record(experience, None)
+                    .remember(experience, None)
                     .expect("Failed to record");
                 (memory_system, memory_id, temp_dir)
             },

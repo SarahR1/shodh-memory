@@ -462,7 +462,7 @@ impl PyMemorySystem {
 
         let memory_id = self
             .inner
-            .record(experience, None)
+            .remember(experience, None)
             .map_err(|e| PyRuntimeError::new_err(format!("Failed to record memory: {}", e)))?;
 
         Ok(memory_id.0.to_string())
@@ -782,8 +782,8 @@ impl PyMemorySystem {
 
         let memories = self
             .inner
-            .retrieve(&query_obj)
-            .map_err(|e| PyRuntimeError::new_err(format!("Failed to retrieve memories: {}", e)))?;
+            .recall(&query_obj)
+            .map_err(|e| PyRuntimeError::new_err(format!("Failed to recall memories: {}", e)))?;
 
         Python::with_gil(|py| {
             memories

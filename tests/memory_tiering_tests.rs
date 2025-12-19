@@ -74,13 +74,13 @@ fn test_working_memory_stores_recent() {
 
     // Record some experiences
     let id1 = memory_system
-        .record(
+        .remember(
             create_experience("First memory", ExperienceType::Observation),
             None,
         )
         .expect("Failed to record");
     let id2 = memory_system
-        .record(
+        .remember(
             create_experience("Second memory", ExperienceType::Observation),
             None,
         )
@@ -92,7 +92,7 @@ fn test_working_memory_stores_recent() {
         ..Default::default()
     };
 
-    let results = memory_system.retrieve(&query).expect("Failed to retrieve");
+    let results = memory_system.recall(&query).expect("Failed to retrieve");
 
     // Should find both memories
     assert!(results.len() >= 2, "Should have at least 2 memories");
@@ -105,7 +105,7 @@ fn test_working_memory_lru_eviction() {
     // Record more than capacity
     for i in 0..10 {
         memory_system
-            .record(
+            .remember(
                 create_experience(&format!("Memory number {}", i), ExperienceType::Observation),
                 None,
             )
@@ -141,7 +141,7 @@ fn test_session_memory_promotion() {
     };
 
     memory_system
-        .record(high_importance, None)
+        .remember(high_importance, None)
         .expect("Failed to record important memory");
 
     // Stats should show promotion activity
@@ -164,7 +164,7 @@ fn test_low_importance_stays_working() {
     };
 
     memory_system
-        .record(low_importance, None)
+        .remember(low_importance, None)
         .expect("Failed to record low importance memory");
 
     // Low importance should still be retrievable
@@ -174,7 +174,7 @@ fn test_low_importance_stays_working() {
         ..Default::default()
     };
 
-    let results = memory_system.retrieve(&query).expect("Failed to retrieve");
+    let results = memory_system.recall(&query).expect("Failed to retrieve");
     assert!(
         !results.is_empty(),
         "Low importance memory should still be retrievable"
@@ -242,7 +242,7 @@ fn test_longterm_persistence() {
 
         // Record important memory that should be persisted
         memory_system
-            .record(
+            .remember(
                 Experience {
                     content: content.to_string(),
                     experience_type: ExperienceType::Decision,
@@ -256,7 +256,7 @@ fn test_longterm_persistence() {
         // Add more memories to trigger eviction from working memory
         for i in 0..5 {
             memory_system
-                .record(
+                .remember(
                     Experience {
                         content: format!("Filler memory {} to trigger eviction", i),
                         experience_type: ExperienceType::Observation,
@@ -327,7 +327,7 @@ fn test_longterm_persistence() {
             ..Default::default()
         };
 
-        let results = memory_system.retrieve(&query).expect("Failed to retrieve");
+        let results = memory_system.recall(&query).expect("Failed to retrieve");
         eprintln!("Search results count: {}", results.len());
 
         // After reopen, memories that were flushed should be available
@@ -359,7 +359,7 @@ fn test_multi_tier_retrieval() {
         };
 
         memory_system
-            .record(
+            .remember(
                 create_experience(
                     &format!("Test memory entry number {} for multi-tier testing", i),
                     importance,
@@ -376,7 +376,7 @@ fn test_multi_tier_retrieval() {
         ..Default::default()
     };
 
-    let results = memory_system.retrieve(&query).expect("Failed to retrieve");
+    let results = memory_system.recall(&query).expect("Failed to retrieve");
 
     assert!(!results.is_empty(), "Should retrieve memories across tiers");
 }
@@ -407,10 +407,10 @@ fn test_importance_affects_tiering() {
     };
 
     memory_system
-        .record(high, None)
+        .remember(high, None)
         .expect("Failed to record high");
     memory_system
-        .record(low, None)
+        .remember(low, None)
         .expect("Failed to record low");
 
     // Both should be retrievable
@@ -435,7 +435,7 @@ fn test_forget_low_importance() {
         };
 
         memory_system
-            .record(create_experience(&format!("Memory {}", i), exp_type), None)
+            .remember(create_experience(&format!("Memory {}", i), exp_type), None)
             .expect("Failed to record");
     }
 
@@ -460,7 +460,7 @@ fn test_forget_by_pattern() {
 
     // Record memories with distinct patterns
     memory_system
-        .record(
+        .remember(
             create_experience(
                 "DELETEME: This should be forgotten",
                 ExperienceType::Observation,
@@ -470,7 +470,7 @@ fn test_forget_by_pattern() {
         .expect("Failed to record");
 
     memory_system
-        .record(
+        .remember(
             create_experience("KEEP: This should remain", ExperienceType::Observation),
             None,
         )
@@ -492,7 +492,7 @@ fn test_forget_by_pattern() {
         ..Default::default()
     };
 
-    let results = memory_system.retrieve(&query).expect("Failed to retrieve");
+    let results = memory_system.recall(&query).expect("Failed to retrieve");
     assert!(
         results
             .iter()
@@ -511,7 +511,7 @@ fn test_similarity_retrieval() {
 
     // Record semantically similar memories
     memory_system
-        .record(
+        .remember(
             create_experience(
                 "The robot navigated through the warehouse avoiding obstacles",
                 ExperienceType::Observation,
@@ -521,7 +521,7 @@ fn test_similarity_retrieval() {
         .expect("Failed");
 
     memory_system
-        .record(
+        .remember(
             create_experience(
                 "Drone flew over the factory detecting anomalies",
                 ExperienceType::Observation,
@@ -538,7 +538,7 @@ fn test_similarity_retrieval() {
         ..Default::default()
     };
 
-    let results = memory_system.retrieve(&query).expect("Failed");
+    let results = memory_system.recall(&query).expect("Failed");
 
     // Should find robotics-related memories
     assert!(
@@ -553,7 +553,7 @@ fn test_hybrid_retrieval() {
 
     // Record memories
     memory_system
-        .record(
+        .remember(
             create_experience(
                 "Mission alpha: drone successfully completed reconnaissance",
                 ExperienceType::Task,
@@ -563,7 +563,7 @@ fn test_hybrid_retrieval() {
         .expect("Failed");
 
     memory_system
-        .record(
+        .remember(
             create_experience(
                 "Mission beta: robot failed to reach waypoint due to obstacle",
                 ExperienceType::Error,
@@ -580,7 +580,7 @@ fn test_hybrid_retrieval() {
         ..Default::default()
     };
 
-    let results = memory_system.retrieve(&query).expect("Failed");
+    let results = memory_system.recall(&query).expect("Failed");
 
     assert!(
         !results.is_empty(),
@@ -611,8 +611,8 @@ fn test_geo_filter_retrieval() {
         ..Default::default()
     };
 
-    memory_system.record(geo_memory, None).expect("Failed");
-    memory_system.record(far_memory, None).expect("Failed");
+    memory_system.remember(geo_memory, None).expect("Failed");
+    memory_system.remember(far_memory, None).expect("Failed");
 
     // Search near San Francisco
     let query = Query {
@@ -624,7 +624,7 @@ fn test_geo_filter_retrieval() {
         ..Default::default()
     };
 
-    let results = memory_system.retrieve(&query).expect("Failed");
+    let results = memory_system.recall(&query).expect("Failed");
 
     // Should find the SF memory
     assert!(
@@ -654,8 +654,8 @@ fn test_mission_filter_retrieval() {
         ..Default::default()
     };
 
-    memory_system.record(mission_a, None).expect("Failed");
-    memory_system.record(mission_b, None).expect("Failed");
+    memory_system.remember(mission_a, None).expect("Failed");
+    memory_system.remember(mission_b, None).expect("Failed");
 
     // Search specific mission - should only return mission_alpha results
     let query = Query {
@@ -665,7 +665,7 @@ fn test_mission_filter_retrieval() {
         ..Default::default()
     };
 
-    let results = memory_system.retrieve(&query).expect("Failed");
+    let results = memory_system.recall(&query).expect("Failed");
 
     // Verify that if we got results, they all have mission_alpha
     // The filter strictly excludes non-matching mission IDs
@@ -687,7 +687,7 @@ fn test_mission_filter_retrieval() {
         ..Default::default()
     };
 
-    let results_beta = memory_system.retrieve(&query_beta).expect("Failed");
+    let results_beta = memory_system.recall(&query_beta).expect("Failed");
     for result in &results_beta {
         if let Some(ref mid) = result.experience.mission_id {
             assert_eq!(
@@ -710,7 +710,7 @@ fn test_high_volume_recording() {
     // Record 100 memories quickly
     for i in 0..100 {
         memory_system
-            .record(
+            .remember(
                 create_experience(
                     &format!("High volume test memory number {}", i),
                     ExperienceType::Observation,
@@ -735,7 +735,7 @@ fn test_concurrent_access_pattern() {
     for i in 0..20 {
         // Write
         memory_system
-            .record(
+            .remember(
                 create_experience(
                     &format!("Concurrent pattern test {}", i),
                     ExperienceType::Observation,
@@ -751,7 +751,7 @@ fn test_concurrent_access_pattern() {
             ..Default::default()
         };
 
-        let results = memory_system.retrieve(&query).expect("Failed to retrieve");
+        let results = memory_system.recall(&query).expect("Failed to retrieve");
         assert!(!results.is_empty(), "Should find recently written memory");
     }
 }
