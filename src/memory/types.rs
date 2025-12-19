@@ -82,6 +82,25 @@ pub struct RichContext {
     /// Environment context - system state, location, etc
     pub environment: EnvironmentContext,
 
+    // =========================================================================
+    // SHO-104: RICHER CONTEXT ENCODING
+    // =========================================================================
+
+    /// Emotional context - affective state during memory formation (SHO-104)
+    /// Captures valence, arousal, and dominant emotion for emotional memory enhancement
+    #[serde(default)]
+    pub emotional: EmotionalContext,
+
+    /// Source context - tracks where information came from (SHO-104)
+    /// Enables source monitoring for memory accuracy and credibility weighting
+    #[serde(default)]
+    pub source: SourceContext,
+
+    /// Episode context - groups memories into coherent episodes (SHO-104)
+    /// Enables temporal ordering and event segmentation within conversations
+    #[serde(default)]
+    pub episode: EpisodeContext,
+
     /// Parent context (for hierarchical context)
     pub parent: Option<Box<RichContext>>,
 
@@ -287,6 +306,165 @@ pub struct EnvironmentContext {
 
     /// System resource usage
     pub resources: HashMap<String, String>,
+}
+
+// =============================================================================
+// SHO-104: RICHER CONTEXT ENCODING
+// Based on neuroscience research on multi-dimensional memory encoding
+// =============================================================================
+
+/// Emotional context - captures affective state during memory formation
+///
+/// Research: Emotional memories are encoded differently and retrieved more easily.
+/// The amygdala modulates hippocampal encoding based on emotional arousal.
+///
+/// Reference: LaBar & Cabeza (2006) "Cognitive neuroscience of emotional memory"
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EmotionalContext {
+    /// Emotional valence: -1.0 (very negative) to 1.0 (very positive)
+    /// 0.0 = neutral
+    ///
+    /// Examples:
+    /// - Bug found: -0.3 (mildly negative)
+    /// - Feature shipped: 0.7 (positive)
+    /// - Critical error: -0.8 (strongly negative)
+    #[serde(default)]
+    pub valence: f32,
+
+    /// Arousal level: 0.0 (calm) to 1.0 (highly aroused/excited)
+    ///
+    /// High arousal memories (both positive and negative) are better retained.
+    /// Examples:
+    /// - Routine task: 0.2 (low arousal)
+    /// - Important deadline: 0.8 (high arousal)
+    /// - Critical production issue: 0.9 (very high arousal)
+    #[serde(default)]
+    pub arousal: f32,
+
+    /// Dominant emotion label (optional, for categorical access)
+    /// E.g., "joy", "frustration", "surprise", "satisfaction", "anxiety"
+    #[serde(default)]
+    pub dominant_emotion: Option<String>,
+
+    /// Sentiment of the content itself (not the user's reaction)
+    /// Useful for distinguishing "user felt frustrated" vs "content describes frustration"
+    #[serde(default)]
+    pub content_sentiment: Option<f32>,
+
+    /// Confidence in the emotional assessment (0.0 to 1.0)
+    /// Lower if inferred from text, higher if explicitly stated
+    #[serde(default)]
+    pub confidence: f32,
+}
+
+/// Source context - tracks where information came from
+///
+/// Research: Source monitoring is crucial for memory accuracy.
+/// Knowing WHO told you something affects how you weight and retrieve it.
+///
+/// Reference: Johnson et al. (1993) "Source monitoring"
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct SourceContext {
+    /// Type of source
+    #[serde(default)]
+    pub source_type: SourceType,
+
+    /// Specific source identifier
+    /// E.g., "user:alice", "api:openai", "file:readme.md", "url:https://..."
+    #[serde(default)]
+    pub source_id: Option<String>,
+
+    /// Human-readable source name
+    #[serde(default)]
+    pub source_name: Option<String>,
+
+    /// Credibility score (0.0 to 1.0)
+    /// How reliable is this source? Affects retrieval ranking.
+    /// - 1.0: Direct user input, verified facts
+    /// - 0.8: Trusted documentation, official sources
+    /// - 0.5: General web content, unverified
+    /// - 0.3: Inferred/generated content
+    #[serde(default = "default_credibility")]
+    pub credibility: f32,
+
+    /// Was this information verified/confirmed?
+    #[serde(default)]
+    pub verified: bool,
+
+    /// Chain of sources (for information that was relayed)
+    /// E.g., ["api:openai", "doc:react-docs", "user:alice"]
+    #[serde(default)]
+    pub source_chain: Vec<String>,
+}
+
+fn default_credibility() -> f32 {
+    0.7 // Default moderate credibility
+}
+
+/// Types of information sources
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub enum SourceType {
+    /// Direct user input (highest credibility default)
+    User,
+    /// System-generated (logs, errors, metrics)
+    System,
+    /// External API response
+    ExternalApi,
+    /// File content
+    File,
+    /// Web/URL content
+    Web,
+    /// AI/LLM generated content
+    AiGenerated,
+    /// Inferred by the system
+    Inferred,
+    /// Unknown source
+    #[default]
+    Unknown,
+}
+
+/// Episode context - groups memories into coherent episodes
+///
+/// Research: Episodic memory organizes experiences into bounded events.
+/// The hippocampus creates "event boundaries" that segment continuous experience.
+///
+/// Reference: Zacks et al. (2007) "Event perception and memory"
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct EpisodeContext {
+    /// Unique episode identifier
+    /// All memories in the same conversation/session share this ID
+    #[serde(default)]
+    pub episode_id: Option<String>,
+
+    /// Sequence number within the episode (1, 2, 3, ...)
+    /// Enables temporal ordering within an episode
+    #[serde(default)]
+    pub sequence_number: Option<u32>,
+
+    /// ID of the immediately preceding memory (temporal chain)
+    #[serde(default)]
+    pub preceding_memory_id: Option<String>,
+
+    /// Episode type (conversation, task, session, etc.)
+    #[serde(default)]
+    pub episode_type: Option<String>,
+
+    /// Episode start time
+    #[serde(default)]
+    pub episode_start: Option<DateTime<Utc>>,
+
+    /// Is this the first memory in the episode?
+    #[serde(default)]
+    pub is_episode_start: bool,
+
+    /// Is this the last memory in the episode?
+    #[serde(default)]
+    pub is_episode_end: bool,
+
+    /// Parent episode (for hierarchical episodes)
+    /// E.g., a conversation within a larger task session
+    #[serde(default)]
+    pub parent_episode_id: Option<String>,
 }
 
 /// Time pattern for recurring behavior

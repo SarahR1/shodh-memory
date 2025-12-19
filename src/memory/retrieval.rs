@@ -403,6 +403,18 @@ impl RetrievalEngine {
                 text.push(' ');
                 text.push_str(name);
             }
+
+            // SHO-104: Add emotional context - emotion labels improve semantic matching
+            if let Some(emotion) = &context.emotional.dominant_emotion {
+                text.push(' ');
+                text.push_str(emotion);
+            }
+
+            // SHO-104: Add episode type for episodic grouping
+            if let Some(episode_type) = &context.episode.episode_type {
+                text.push(' ');
+                text.push_str(episode_type);
+            }
         }
 
         // Add outcomes
@@ -1605,6 +1617,12 @@ pub struct PrefetchContext {
     pub recent_queries: Vec<String>,
     /// Current task type (coding, debugging, reviewing)
     pub task_type: Option<String>,
+
+    // SHO-104: Episode context for episodic prefetching
+    /// Current episode ID - memories in same episode are highly relevant
+    pub episode_id: Option<String>,
+    /// Current emotional valence - for mood-congruent retrieval
+    pub emotional_valence: Option<f32>,
 }
 
 impl PrefetchContext {
@@ -1635,6 +1653,13 @@ impl PrefetchContext {
                 }),
             recent_queries: Vec::new(),
             task_type: ctx.project.current_task.clone(),
+            // SHO-104: Episode and emotional context
+            episode_id: ctx.episode.episode_id.clone(),
+            emotional_valence: if ctx.emotional.valence != 0.0 {
+                Some(ctx.emotional.valence)
+            } else {
+                None
+            },
         }
     }
 
@@ -1909,6 +1934,37 @@ impl AnticipatoryPrefetch {
             score += PREFETCH_RECENCY_FULL_BOOST;
         } else if age_hours < PREFETCH_RECENCY_PARTIAL_HOURS {
             score += PREFETCH_RECENCY_PARTIAL_BOOST;
+        }
+
+        // SHO-104: Emotional arousal boost - high-arousal memories are more salient
+        // Research: Emotionally arousing events are better remembered (LaBar & Cabeza, 2006)
+        if let Some(ctx) = &memory.experience.context {
+            // High arousal memories get a relevance boost
+            if ctx.emotional.arousal > 0.6 {
+                score += 0.1 * ctx.emotional.arousal;
+            }
+
+            // Source credibility affects relevance - more credible = more relevant
+            if ctx.source.credibility > 0.8 {
+                score += 0.05;
+            }
+
+            // Episode context: same episode = highly relevant
+            if let Some(current_episode) = &context.episode_id {
+                if ctx.episode.episode_id.as_ref() == Some(current_episode) {
+                    score += 0.3; // Strong boost for same-episode memories
+                }
+            }
+
+            // Mood-congruent retrieval: similar emotional valence boosts relevance
+            // Research: We recall happy memories when happy, sad when sad
+            if let Some(current_valence) = context.emotional_valence {
+                let valence_diff = (ctx.emotional.valence - current_valence).abs();
+                if valence_diff < 0.3 {
+                    // Same emotional valence quadrant
+                    score += 0.1 * (1.0 - valence_diff / 0.3);
+                }
+            }
         }
 
         score.min(1.0)

@@ -37,6 +37,10 @@ impl ContextBuilder {
                 code: CodeContext::default(),
                 document: DocumentContext::default(),
                 environment: EnvironmentContext::default(),
+                // SHO-104: Richer context encoding
+                emotional: EmotionalContext::default(),
+                source: SourceContext::default(),
+                episode: EpisodeContext::default(),
                 parent: None,
                 embeddings: None,
                 decay_rate: 0.1, // Default decay
@@ -97,6 +101,26 @@ impl ContextBuilder {
     /// Set temporal context
     pub fn with_temporal(mut self, temporal: TemporalContext) -> Self {
         self.context.temporal = temporal;
+        self
+    }
+
+    // SHO-104: Builder methods for richer context encoding
+
+    /// Set emotional context (valence, arousal, dominant emotion)
+    pub fn with_emotional(mut self, emotional: EmotionalContext) -> Self {
+        self.context.emotional = emotional;
+        self
+    }
+
+    /// Set source context (source type, credibility)
+    pub fn with_source(mut self, source: SourceContext) -> Self {
+        self.context.source = source;
+        self
+    }
+
+    /// Set episode context (episode ID, sequence, temporal chain)
+    pub fn with_episode(mut self, episode: EpisodeContext) -> Self {
+        self.context.episode = episode;
         self
     }
 

@@ -1126,6 +1126,44 @@ struct RememberRequest {
     /// Use ISO 8601 format (e.g., "2025-12-15T06:30:00Z")
     #[serde(default)]
     created_at: Option<chrono::DateTime<chrono::Utc>>,
+
+    // =========================================================================
+    // SHO-104: RICHER CONTEXT ENCODING - Optional context fields
+    // =========================================================================
+
+    /// Emotional valence: -1.0 (negative) to 1.0 (positive), 0.0 = neutral
+    /// E.g., bug found: -0.3, feature shipped: 0.7
+    #[serde(default)]
+    emotional_valence: Option<f32>,
+
+    /// Arousal level: 0.0 (calm) to 1.0 (highly aroused)
+    /// E.g., routine task: 0.2, critical production issue: 0.9
+    #[serde(default)]
+    emotional_arousal: Option<f32>,
+
+    /// Dominant emotion label (e.g., "joy", "frustration", "surprise")
+    #[serde(default)]
+    emotion: Option<String>,
+
+    /// Source type: "user", "system", "api", "file", "web", "ai_generated", "inferred"
+    #[serde(default)]
+    source_type: Option<String>,
+
+    /// Credibility score: 0.0 to 1.0 (1.0 = verified facts, 0.3 = inferred)
+    #[serde(default)]
+    credibility: Option<f32>,
+
+    /// Episode ID - groups memories into coherent episodes/conversations
+    #[serde(default)]
+    episode_id: Option<String>,
+
+    /// Sequence number within episode (1, 2, 3...)
+    #[serde(default)]
+    sequence_number: Option<u32>,
+
+    /// ID of the preceding memory (for temporal chains)
+    #[serde(default)]
+    preceding_memory_id: Option<String>,
 }
 
 /// Simplified remember response
@@ -1228,6 +1266,24 @@ struct BatchMemoryItem {
     /// Optional timestamp for the memory
     #[serde(default)]
     created_at: Option<chrono::DateTime<chrono::Utc>>,
+
+    // SHO-104: RICHER CONTEXT ENCODING - Optional context fields (same as RememberRequest)
+    #[serde(default)]
+    emotional_valence: Option<f32>,
+    #[serde(default)]
+    emotional_arousal: Option<f32>,
+    #[serde(default)]
+    emotion: Option<String>,
+    #[serde(default)]
+    source_type: Option<String>,
+    #[serde(default)]
+    credibility: Option<f32>,
+    #[serde(default)]
+    episode_id: Option<String>,
+    #[serde(default)]
+    sequence_number: Option<u32>,
+    #[serde(default)]
+    preceding_memory_id: Option<String>,
 }
 
 /// Error detail for a single item in batch
@@ -1995,6 +2051,89 @@ async fn remember(
     // Save experience type string before it's moved
     let experience_type_str = format!("{:?}", experience_type);
 
+    // SHO-104: Build RichContext if any context fields are provided
+    let has_context = req.emotional_valence.is_some()
+        || req.emotional_arousal.is_some()
+        || req.emotion.is_some()
+        || req.source_type.is_some()
+        || req.credibility.is_some()
+        || req.episode_id.is_some()
+        || req.sequence_number.is_some()
+        || req.preceding_memory_id.is_some();
+
+    let context = if has_context {
+        use memory::types::{
+            ContextId, EmotionalContext, EpisodeContext, RichContext, SourceContext, SourceType,
+        };
+
+        // Build EmotionalContext
+        let emotional = EmotionalContext {
+            valence: req.emotional_valence.unwrap_or(0.0),
+            arousal: req.emotional_arousal.unwrap_or(0.0),
+            dominant_emotion: req.emotion.clone(),
+            confidence: if req.emotional_valence.is_some() || req.emotional_arousal.is_some() {
+                0.8 // User-provided emotional data has good confidence
+            } else {
+                0.0
+            },
+            ..Default::default()
+        };
+
+        // Build SourceContext
+        let source_type = req
+            .source_type
+            .as_ref()
+            .map(|s| match s.to_lowercase().as_str() {
+                "user" => SourceType::User,
+                "system" => SourceType::System,
+                "api" | "external_api" => SourceType::ExternalApi,
+                "file" => SourceType::File,
+                "web" => SourceType::Web,
+                "ai_generated" | "ai" => SourceType::AiGenerated,
+                "inferred" => SourceType::Inferred,
+                _ => SourceType::Unknown,
+            })
+            .unwrap_or(SourceType::User); // Default to User for /api/remember
+
+        let source = SourceContext {
+            source_type,
+            credibility: req.credibility.unwrap_or(0.8), // User input default to high credibility
+            ..Default::default()
+        };
+
+        // Build EpisodeContext
+        let episode = EpisodeContext {
+            episode_id: req.episode_id.clone(),
+            sequence_number: req.sequence_number,
+            preceding_memory_id: req.preceding_memory_id.clone(),
+            is_episode_start: req.sequence_number == Some(1),
+            ..Default::default()
+        };
+
+        let now = chrono::Utc::now();
+        Some(RichContext {
+            id: ContextId(uuid::Uuid::new_v4()),
+            emotional,
+            source,
+            episode,
+            conversation: Default::default(),
+            user: Default::default(),
+            project: Default::default(),
+            temporal: Default::default(),
+            semantic: Default::default(),
+            code: Default::default(),
+            document: Default::default(),
+            environment: Default::default(),
+            parent: None,
+            embeddings: None,
+            decay_rate: 1.0,
+            created_at: now,
+            updated_at: now,
+        })
+    } else {
+        None
+    };
+
     // Auto-create Experience with sensible defaults
     // Note: tags field is for explicit user tags, entities field includes tags + NER-extracted
     let experience = Experience {
@@ -2002,6 +2141,7 @@ async fn remember(
         experience_type,
         entities: merged_entities,
         tags: req.tags.clone(),
+        context,
         ..Default::default()
     };
 
@@ -4279,11 +4419,93 @@ async fn batch_remember(
             item.tags.clone()
         };
 
+        // SHO-104: Build RichContext if any context fields are provided
+        let has_context = item.emotional_valence.is_some()
+            || item.emotional_arousal.is_some()
+            || item.emotion.is_some()
+            || item.source_type.is_some()
+            || item.credibility.is_some()
+            || item.episode_id.is_some()
+            || item.sequence_number.is_some()
+            || item.preceding_memory_id.is_some();
+
+        let context = if has_context {
+            use memory::types::{
+                ContextId, EmotionalContext, EpisodeContext, RichContext, SourceContext, SourceType,
+            };
+
+            let emotional = EmotionalContext {
+                valence: item.emotional_valence.unwrap_or(0.0),
+                arousal: item.emotional_arousal.unwrap_or(0.0),
+                dominant_emotion: item.emotion.clone(),
+                confidence: if item.emotional_valence.is_some() || item.emotional_arousal.is_some()
+                {
+                    0.8
+                } else {
+                    0.0
+                },
+                ..Default::default()
+            };
+
+            let source_type = item
+                .source_type
+                .as_ref()
+                .map(|s| match s.to_lowercase().as_str() {
+                    "user" => SourceType::User,
+                    "system" => SourceType::System,
+                    "api" | "external_api" => SourceType::ExternalApi,
+                    "file" => SourceType::File,
+                    "web" => SourceType::Web,
+                    "ai_generated" | "ai" => SourceType::AiGenerated,
+                    "inferred" => SourceType::Inferred,
+                    _ => SourceType::Unknown,
+                })
+                .unwrap_or(SourceType::User);
+
+            let source = SourceContext {
+                source_type,
+                credibility: item.credibility.unwrap_or(0.8),
+                ..Default::default()
+            };
+
+            let episode = EpisodeContext {
+                episode_id: item.episode_id.clone(),
+                sequence_number: item.sequence_number,
+                preceding_memory_id: item.preceding_memory_id.clone(),
+                is_episode_start: item.sequence_number == Some(1),
+                ..Default::default()
+            };
+
+            let now = chrono::Utc::now();
+            Some(RichContext {
+                id: ContextId(uuid::Uuid::new_v4()),
+                emotional,
+                source,
+                episode,
+                conversation: Default::default(),
+                user: Default::default(),
+                project: Default::default(),
+                temporal: Default::default(),
+                semantic: Default::default(),
+                code: Default::default(),
+                document: Default::default(),
+                environment: Default::default(),
+                parent: None,
+                embeddings: None,
+                decay_rate: 1.0,
+                created_at: now,
+                updated_at: now,
+            })
+        } else {
+            None
+        };
+
         let experience = Experience {
             content: item.content,
             experience_type,
             entities: merged_entities,
             tags: item.tags,
+            context,
             ..Default::default()
         };
 

@@ -414,6 +414,40 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               type: "string",
               description: "Optional ISO 8601 timestamp for the memory (e.g., '2025-12-15T06:30:00Z'). If not provided, uses current time.",
             },
+            // SHO-104: Richer context encoding
+            emotional_valence: {
+              type: "number",
+              description: "Emotional valence: -1.0 (negative) to 1.0 (positive), 0.0 = neutral. E.g., bug found: -0.3, feature shipped: 0.7",
+            },
+            emotional_arousal: {
+              type: "number",
+              description: "Arousal level: 0.0 (calm) to 1.0 (highly aroused). E.g., routine task: 0.2, critical issue: 0.9",
+            },
+            emotion: {
+              type: "string",
+              description: "Dominant emotion label (e.g., 'joy', 'frustration', 'surprise')",
+            },
+            source_type: {
+              type: "string",
+              enum: ["user", "system", "api", "file", "web", "ai_generated", "inferred"],
+              description: "Source type: where the information came from",
+            },
+            credibility: {
+              type: "number",
+              description: "Credibility score: 0.0 to 1.0 (1.0 = verified facts, 0.3 = inferred)",
+            },
+            episode_id: {
+              type: "string",
+              description: "Episode ID - groups memories into coherent episodes/conversations",
+            },
+            sequence_number: {
+              type: "number",
+              description: "Sequence number within episode (1, 2, 3...)",
+            },
+            preceding_memory_id: {
+              type: "string",
+              description: "ID of the preceding memory (for temporal chains)",
+            },
           },
           required: ["content"],
         },
@@ -727,11 +761,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const executeTool = async (): Promise<ToolResult> => {
     switch (name) {
       case "remember": {
-        const { content, type = "Observation", tags = [], created_at } = args as {
+        const {
+          content,
+          type = "Observation",
+          tags = [],
+          created_at,
+          // SHO-104: Richer context encoding fields
+          emotional_valence,
+          emotional_arousal,
+          emotion,
+          source_type,
+          credibility,
+          episode_id,
+          sequence_number,
+          preceding_memory_id,
+        } = args as {
           content: string;
           type?: string;
           tags?: string[];
           created_at?: string;
+          emotional_valence?: number;
+          emotional_arousal?: number;
+          emotion?: string;
+          source_type?: string;
+          credibility?: number;
+          episode_id?: string;
+          sequence_number?: number;
+          preceding_memory_id?: string;
         };
 
         const result = await apiCall<{ id: string }>("/api/remember", "POST", {
@@ -740,6 +796,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           memory_type: type,
           tags,
           ...(created_at && { created_at }),
+          // SHO-104: Pass richer context to API
+          ...(emotional_valence !== undefined && { emotional_valence }),
+          ...(emotional_arousal !== undefined && { emotional_arousal }),
+          ...(emotion && { emotion }),
+          ...(source_type && { source_type }),
+          ...(credibility !== undefined && { credibility }),
+          ...(episode_id && { episode_id }),
+          ...(sequence_number !== undefined && { sequence_number }),
+          ...(preceding_memory_id && { preceding_memory_id }),
         });
 
         return {
