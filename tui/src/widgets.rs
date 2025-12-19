@@ -1037,19 +1037,47 @@ fn render_activity_feed(f: &mut Frame, area: Rect, state: &AppState) {
         let is_selected = state.selected_event == Some(global_idx);
         let is_newest = global_idx == 0;
 
-        // Yellow highlight for new events - fades over 30 seconds
-        // Skip historical events (loaded on startup) - only highlight live SSE events
-        let flash_age = event.received_at.elapsed().as_millis() as f32;
+        // Glow effect for new events - smooth fade over 2 seconds
+        let glow = event.glow(); // 0.0 to 1.0, fades over 2 seconds
         let is_history = event.event.event_type == "HISTORY";
-        let is_fresh = !is_history && flash_age < 30000.0;
+        let is_glowing = !is_history && glow > 0.0;
 
-        let color = if is_fresh { Color::Yellow } else { event.event.event_color() };
+        // Dynamic color based on glow intensity
+        let base_color = event.event.event_color();
+        let color = if is_glowing {
+            // Blend towards bright yellow/white based on glow
+            let (r, g, b) = color_to_rgb(base_color);
+            let glow_boost = glow * 0.5;
+            Color::Rgb(
+                (r as f32 + (255.0 - r as f32) * glow_boost).min(255.0) as u8,
+                (g as f32 + (255.0 - g as f32) * glow_boost).min(255.0) as u8,
+                (b as f32 + (100.0 - b as f32) * glow_boost).min(255.0) as u8,
+            )
+        } else {
+            base_color
+        };
         let icon = event.event.event_icon();
 
-        // Timeline node: YELLOW for fresh, green for newest, cyan for selected
-        let node = if is_newest { "★" } else { "○" };
-        let node_color = if is_fresh {
-            Color::Yellow
+        // Timeline node: animated for glowing events
+        let node = if is_glowing && glow > 0.7 {
+            "◉" // Bright filled
+        } else if is_glowing && glow > 0.3 {
+            "●" // Filled
+        } else if is_newest {
+            "★" // Star for newest
+        } else {
+            "○" // Empty
+        };
+
+        let node_color = if is_glowing {
+            // Pulsing glow color
+            let pulse = (state.animation_tick as f32 * 0.3).sin() * 0.2 + 0.8;
+            let intensity = glow * pulse;
+            Color::Rgb(
+                (255.0 * intensity).min(255.0) as u8,
+                (200.0 * intensity).min(255.0) as u8,
+                (50.0 * intensity).min(255.0) as u8,
+            )
         } else if is_newest {
             Color::Green
         } else if is_selected {
@@ -1088,23 +1116,29 @@ fn render_activity_feed(f: &mut Frame, area: Rect, state: &AppState) {
             ),
         ]);
 
-        // Line 2: Content (full width) - YELLOW for fresh events
+        // Line 2: Content with glow effect
         let preview = event
             .event
             .content_preview
             .as_ref()
             .map(|s| truncate(s, content_width))
             .unwrap_or_default();
-        // Use theme-aware colors for content readability on both dark and light backgrounds
-        let content_color = if is_fresh {
-            Color::Yellow
+        // Content brightness based on glow
+        let content_color = if is_glowing {
+            let brightness = 180.0 + glow * 75.0; // 180 to 255
+            Color::Rgb(brightness as u8, brightness as u8, (brightness * 0.9) as u8)
         } else if is_selected {
             state.theme.fg()
         } else {
             state.theme.fg_dim()
         };
+        let connector_color = if is_glowing {
+            Color::Rgb((255.0 * glow) as u8, (200.0 * glow) as u8, (50.0 * glow) as u8)
+        } else {
+            Color::DarkGray
+        };
         let line2 = Line::from(vec![
-            Span::styled("│ ", Style::default().fg(if is_fresh { Color::Yellow } else { Color::DarkGray })),
+            Span::styled("│ ", Style::default().fg(connector_color)),
             Span::styled(
                 preview,
                 Style::default().fg(content_color).bg(bg),
