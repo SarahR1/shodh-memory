@@ -1861,7 +1861,10 @@ impl PyMemorySystem {
                 .map(|(m, score, reason)| {
                     let mut mem = HashMap::new();
                     mem.insert("id".to_string(), m.id.0.to_string().into_py(py));
-                    mem.insert("content".to_string(), m.experience.content.clone().into_py(py));
+                    mem.insert(
+                        "content".to_string(),
+                        m.experience.content.clone().into_py(py),
+                    );
                     mem.insert(
                         "memory_type".to_string(),
                         format!("{:?}", m.experience.experience_type).into_py(py),
@@ -1869,7 +1872,10 @@ impl PyMemorySystem {
                     mem.insert("importance".to_string(), m.importance().into_py(py));
                     mem.insert("relevance_score".to_string(), score.into_py(py));
                     mem.insert("relevance_reason".to_string(), reason.into_py(py));
-                    mem.insert("created_at".to_string(), m.created_at.to_rfc3339().into_py(py));
+                    mem.insert(
+                        "created_at".to_string(),
+                        m.created_at.to_rfc3339().into_py(py),
+                    );
                     mem.insert("tags".to_string(), m.experience.tags.clone().into_py(py));
                     mem
                 })
@@ -1881,13 +1887,18 @@ impl PyMemorySystem {
             result.insert("latency_ms".to_string(), latency_ms.into_py(py));
             result.insert(
                 "ingested_id".to_string(),
-                ingested_id.map(|id| id.into_py(py)).unwrap_or_else(|| py.None()),
+                ingested_id
+                    .map(|id| id.into_py(py))
+                    .unwrap_or_else(|| py.None()),
             );
             result.insert(
                 "config".to_string(),
                 {
                     let mut cfg = HashMap::new();
-                    cfg.insert("semantic_threshold".to_string(), semantic_threshold.into_py(py));
+                    cfg.insert(
+                        "semantic_threshold".to_string(),
+                        semantic_threshold.into_py(py),
+                    );
                     cfg.insert("max_results".to_string(), max_results.into_py(py));
                     cfg.insert("recency_weight".to_string(), recency_weight.into_py(py));
                     cfg.insert("auto_ingest".to_string(), auto_ingest.into_py(py));
@@ -1917,9 +1928,18 @@ impl PyMemorySystem {
 
         Python::with_gil(|py| {
             let mut result = HashMap::new();
-            result.insert("total_storage".to_string(), report.total_storage.into_py(py));
-            result.insert("total_indexed".to_string(), report.total_indexed.into_py(py));
-            result.insert("orphaned_count".to_string(), report.orphaned_count.into_py(py));
+            result.insert(
+                "total_storage".to_string(),
+                report.total_storage.into_py(py),
+            );
+            result.insert(
+                "total_indexed".to_string(),
+                report.total_indexed.into_py(py),
+            );
+            result.insert(
+                "orphaned_count".to_string(),
+                report.orphaned_count.into_py(py),
+            );
             result.insert("is_healthy".to_string(), report.is_healthy.into_py(py));
             result.insert(
                 "orphaned_ids".to_string(),
@@ -1968,20 +1988,38 @@ impl PyMemorySystem {
 
         Python::with_gil(|py| {
             let mut result = HashMap::new();
-            result.insert("total_vectors".to_string(), health.total_vectors.into_py(py));
-            result.insert("deleted_count".to_string(), health.deleted_count.into_py(py));
-            result.insert("deletion_ratio".to_string(), health.deletion_ratio.into_py(py));
-            result.insert("needs_compaction".to_string(), health.needs_compaction.into_py(py));
+            result.insert(
+                "total_vectors".to_string(),
+                health.total_vectors.into_py(py),
+            );
+            result.insert(
+                "deleted_count".to_string(),
+                health.deleted_count.into_py(py),
+            );
+            result.insert(
+                "deletion_ratio".to_string(),
+                health.deletion_ratio.into_py(py),
+            );
+            result.insert(
+                "needs_compaction".to_string(),
+                health.needs_compaction.into_py(py),
+            );
             result.insert(
                 "incremental_inserts".to_string(),
                 health.incremental_inserts.into_py(py),
             );
-            result.insert("needs_rebuild".to_string(), health.needs_rebuild.into_py(py));
+            result.insert(
+                "needs_rebuild".to_string(),
+                health.needs_rebuild.into_py(py),
+            );
             result.insert(
                 "rebuild_threshold".to_string(),
                 health.rebuild_threshold.into_py(py),
             );
-            result.insert("healthy".to_string(), (!health.needs_rebuild && !health.needs_compaction).into_py(py));
+            result.insert(
+                "healthy".to_string(),
+                (!health.needs_rebuild && !health.needs_compaction).into_py(py),
+            );
             Ok(result)
         })
     }
