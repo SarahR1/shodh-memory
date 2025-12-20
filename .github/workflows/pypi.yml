@@ -24,6 +24,19 @@ jobs:
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
 
+      - name: Download models and ONNX Runtime
+        run: |
+          mkdir -p shodh_memory/models/minilm-l6 shodh_memory/models/bert-tiny-ner shodh_memory/lib
+          curl -L -o shodh_memory/models/minilm-l6/model_quantized.onnx "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_quint8_avx2.onnx"
+          curl -L -o shodh_memory/models/minilm-l6/tokenizer.json "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"
+          curl -L -o shodh_memory/models/bert-tiny-ner/model.onnx "https://huggingface.co/onnx-community/TinyBERT-finetuned-NER-ONNX/resolve/main/onnx/model_quantized.onnx"
+          curl -L -o shodh_memory/models/bert-tiny-ner/tokenizer.json "https://huggingface.co/onnx-community/TinyBERT-finetuned-NER-ONNX/resolve/main/tokenizer.json"
+          curl -L -o onnxruntime.tgz "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-x64-1.22.0.tgz"
+          tar -xzf onnxruntime.tgz
+          cp onnxruntime-linux-x64-1.22.0/lib/libonnxruntime.so.1.22.0 shodh_memory/lib/libonnxruntime.so
+          ls -la shodh_memory/models/minilm-l6/ shodh_memory/models/bert-tiny-ner/ shodh_memory/lib/
+        shell: bash
+
       - name: Build wheels with maturin
         run: |
           source $HOME/.cargo/env
@@ -51,6 +64,17 @@ jobs:
         with:
           targets: aarch64-apple-darwin
 
+      - name: Download models and ONNX Runtime
+        run: |
+          mkdir -p shodh_memory/models/minilm-l6 shodh_memory/models/bert-tiny-ner shodh_memory/lib
+          curl -L -o shodh_memory/models/minilm-l6/model_quantized.onnx "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_quint8_avx2.onnx"
+          curl -L -o shodh_memory/models/minilm-l6/tokenizer.json "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"
+          curl -L -o shodh_memory/models/bert-tiny-ner/model.onnx "https://huggingface.co/onnx-community/TinyBERT-finetuned-NER-ONNX/resolve/main/onnx/model_quantized.onnx"
+          curl -L -o shodh_memory/models/bert-tiny-ner/tokenizer.json "https://huggingface.co/onnx-community/TinyBERT-finetuned-NER-ONNX/resolve/main/tokenizer.json"
+          curl -L -o onnxruntime.tgz "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-osx-arm64-1.22.0.tgz"
+          tar -xzf onnxruntime.tgz
+          cp onnxruntime-osx-arm64-1.22.0/lib/libonnxruntime.1.22.0.dylib shodh_memory/lib/libonnxruntime.dylib
+
       - name: Install maturin
         run: pip install maturin
 
@@ -77,6 +101,17 @@ jobs:
         with:
           targets: x86_64-apple-darwin
 
+      - name: Download models and ONNX Runtime
+        run: |
+          mkdir -p shodh_memory/models/minilm-l6 shodh_memory/models/bert-tiny-ner shodh_memory/lib
+          curl -L -o shodh_memory/models/minilm-l6/model_quantized.onnx "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_quint8_avx2.onnx"
+          curl -L -o shodh_memory/models/minilm-l6/tokenizer.json "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json"
+          curl -L -o shodh_memory/models/bert-tiny-ner/model.onnx "https://huggingface.co/onnx-community/TinyBERT-finetuned-NER-ONNX/resolve/main/onnx/model_quantized.onnx"
+          curl -L -o shodh_memory/models/bert-tiny-ner/tokenizer.json "https://huggingface.co/onnx-community/TinyBERT-finetuned-NER-ONNX/resolve/main/tokenizer.json"
+          curl -L -o onnxruntime.tgz "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-osx-x86_64-1.22.0.tgz"
+          tar -xzf onnxruntime.tgz
+          cp onnxruntime-osx-x86_64-1.22.0/lib/libonnxruntime.1.22.0.dylib shodh_memory/lib/libonnxruntime.dylib
+
       - name: Install maturin
         run: pip install maturin
 
@@ -102,6 +137,21 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: x86_64-pc-windows-msvc
+
+      - name: Download models and ONNX Runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path shodh_memory/models/minilm-l6
+          New-Item -ItemType Directory -Force -Path shodh_memory/models/bert-tiny-ner
+          New-Item -ItemType Directory -Force -Path shodh_memory/lib
+          Invoke-WebRequest -Uri "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_quint8_avx2.onnx" -OutFile "shodh_memory/models/minilm-l6/model_quantized.onnx"
+          Invoke-WebRequest -Uri "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json" -OutFile "shodh_memory/models/minilm-l6/tokenizer.json"
+          Invoke-WebRequest -Uri "https://huggingface.co/onnx-community/TinyBERT-finetuned-NER-ONNX/resolve/main/onnx/model_quantized.onnx" -OutFile "shodh_memory/models/bert-tiny-ner/model.onnx"
+          Invoke-WebRequest -Uri "https://huggingface.co/onnx-community/TinyBERT-finetuned-NER-ONNX/resolve/main/tokenizer.json" -OutFile "shodh_memory/models/bert-tiny-ner/tokenizer.json"
+          Invoke-WebRequest -Uri "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-win-x64-1.22.0.zip" -OutFile "onnxruntime.zip"
+          Expand-Archive -Path "onnxruntime.zip" -DestinationPath "."
+          Copy-Item "onnxruntime-win-x64-1.22.0/lib/onnxruntime.dll" -Destination "shodh_memory/lib/onnxruntime.dll"
+          Copy-Item "onnxruntime-win-x64-1.22.0/lib/onnxruntime_providers_shared.dll" -Destination "shodh_memory/lib/onnxruntime_providers_shared.dll"
 
       - name: Install maturin
         run: pip install maturin
